@@ -22,6 +22,11 @@
 
 * { box-sizing: border-box; }
 
+/* Das hidden-Attribut wirkt nur ueber die Vorgabe display:none des Browsers -
+   jede eigene display-Regel schlaegt es (etwa label { display: grid }). Hier
+   ausdruecklich durchsetzen, sonst zeigt das Login das 2FA-Feld immer an. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);
