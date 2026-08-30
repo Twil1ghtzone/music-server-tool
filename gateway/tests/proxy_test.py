@@ -90,27 +90,43 @@ class FakeDeemix(BaseHTTPRequestHandler):
     aus wie ein Erfolg.
     """
 
-    mode = "reject"  # "reject" | "accept"
+    mode = "reject"      # "reject" | "accept" | "needs-login"
+    logged_in = False    # wie beim Original: Sitzungszustand im Server
+    good_arl = "abcdef0123456789"
 
     def log_message(self, *args):
         pass
 
-    def _send(self, payload: dict) -> None:
+    def _send(self, payload: dict, code: int = 200) -> None:
         body = json.dumps(payload).encode()
-        self.send_response(200)
+        self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def do_POST(self):
-        if urlparse(self.path).path != "/api/addToQueue":
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length)
+
+        if path == "/api/loginArl":
+            arl = (json.loads(raw or b"{}") or {}).get("arl", "")
+            if arl == FakeDeemix.good_arl:
+                FakeDeemix.logged_in = True
+                self._send({"status": 1, "arl": arl, "user": {"name": "Andrej"}})
+            else:
+                self._send({"status": 0, "arl": arl, "user": {}})
+            return
+
+        if path != "/api/addToQueue":
             self.send_response(404)
             self.end_headers()
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        self.rfile.read(length)
-        if FakeDeemix.mode == "accept":
+
+        if FakeDeemix.mode == "accept" or (
+            FakeDeemix.mode == "needs-login" and FakeDeemix.logged_in
+        ):
             self._send({"result": True, "data": {"obj": {"id": "1"}}})
         else:
             self._send({"result": False, "errid": "NotLoggedIn",
@@ -271,17 +287,61 @@ async def _deemix_cases() -> tuple[str, str]:
         angenommen = await deemix.add_to_queue("https://www.deezer.com/track/1", "3")
     except Exception as exc:
         angenommen = f"FEHLER {exc}"
+
+    # ARL hinterlegen: falsche Werte duerfen nicht gespeichert werden.
+    krumm = ""
+    try:
+        await deemix.set_arl("nicht-hex!!")
+    except deemix.DeemixRejected as exc:
+        krumm = str(exc)
+    falsch = ""
+    try:
+        await deemix.set_arl("00112233445566")
+    except deemix.DeemixRejected as exc:
+        falsch = str(exc)
+    gespeichert_nach_fehler = await deemix.arl_info()
+
+    richtig = await deemix.set_arl(FakeDeemix.good_arl)
+    info = await deemix.arl_info()
+
+    # Der Kern: Deemix meldet NotLoggedIn, der Gateway meldet sich selbst an
+    # und versucht erneut - ohne dass jemand eingreift.
+    FakeDeemix.mode = "needs-login"
+    FakeDeemix.logged_in = False
+    try:
+        selbstheilung = await deemix.add_to_queue("https://www.deezer.com/track/1", "3")
+    except Exception as exc:
+        selbstheilung = f"FEHLER {exc}"
+
     await _dbmod.db.close()
-    return abgelehnt, angenommen
+    return (abgelehnt, angenommen, krumm, falsch,
+            gespeichert_nach_fehler, richtig, info, selbstheilung)
 
 
-_rejected, _accepted = asyncio.run(_deemix_cases())
+(_rejected, _accepted, _krumm, _falsch, _nach_fehler,
+ _richtig, _info, _selbstheilung) = asyncio.run(_deemix_cases())
+
+# Deemix lehnt mit HTTP 200 ab; der Gateway erkennt das, versucht sich
+# anzumelden und meldet dann das eigentliche Hindernis - den fehlenden ARL.
 check("Deemix: Ablehnung mit HTTP 200 wird erkannt",
-      "NotLoggedIn" in _rejected, _rejected[:90])
+      "ARL" in _rejected, _rejected[:90])
 check("Deemix: Ablehnung ist ein permanenter Fehler",
       issubclass(deemix.DeemixRejected, PermanentError))
 check("Deemix: Annahme wird als Erfolg gewertet",
       "angenommen" in _accepted, _accepted[:70])
+
+check("ARL: Nicht-Hex wird abgewiesen", "Hex-Zeichen" in _krumm, _krumm[:70])
+check("ARL: von Deezer abgelehnter Wert wird abgewiesen",
+      "abgelehnt" in _falsch or "abgelaufen" in _falsch, _falsch[:70])
+check("ARL: nichts Kaputtes wird gespeichert",
+      _nach_fehler["configured"] is False, str(_nach_fehler))
+check("ARL: gueltiger Wert meldet den Benutzer", _richtig.get("user") == "Andrej",
+      str(_richtig))
+check("ARL: wird nie im Klartext herausgegeben",
+      _info["configured"] and FakeDeemix.good_arl not in json.dumps(_info),
+      str(_info))
+check("Deemix: NotLoggedIn loest eine eigene Anmeldung aus",
+      "angenommen" in _selbstheilung, _selbstheilung[:80])
 
 server.shutdown()
 deemix_server.shutdown()

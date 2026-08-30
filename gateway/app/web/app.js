@@ -619,11 +619,33 @@ async function loadDiagnostics() {
          Subsonic-Token, und nur das liegt in der Datenbank.
        </p>`;
 
+  const arl = await api('/api/deemix/arl');
+  const deezer = arl.configured
+    ? `<p>ARL hinterlegt <span class="muted mono">${esc(arl.hint || '')}</span> —
+         der Gateway meldet sich damit selbst bei Deemix an.</p>
+       <button id="arl-clear" class="ghost">ARL entfernen</button>`
+    : `<p class="muted">Deemix hält die Deezer-Anmeldung <strong>pro Browser-Sitzung</strong>.
+         Dass die Deemix-Oberfläche angemeldet ist, hilft dem Gateway nicht — er ist
+         ein eigener Client. Trag den ARL hier ein, dann meldet er sich selbst an.</p>
+       <form id="arl-form" class="row">
+         <input name="arl" type="password" placeholder="ARL (nur Hex-Zeichen)"
+                autocomplete="off" required>
+         <button class="primary" type="submit">Anmelden</button>
+       </form>
+       <p class="muted" style="margin-top:.6rem">
+         Wird vor dem Speichern gegen Deezer geprüft und danach nie wieder
+         ausgegeben — im Dashboard stehen nur die letzten Zeichen.
+       </p>`;
+
   $('#diagnostics-body').innerHTML = `
     ${readiness}
     <div class="card">
       <h3>Navidrome-Zugang</h3>
       ${zugang}
+    </div>
+    <div class="card">
+      <h3>Deemix-Anmeldung (Deezer-ARL)</h3>
+      ${deezer}
     </div>
     <div class="card">
       <h3>Startprüfung</h3>
@@ -713,11 +735,33 @@ document.addEventListener('submit', async (event) => {
   }
 });
 
-document.addEventListener('click', async (event) => {
-  if (!event.target.closest('#cred-clear')) return;
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest('#arl-form');
+  if (!form) return;
+  event.preventDefault();
+  const button = form.querySelector('button');
+  button.disabled = true;
   try {
-    await api('/api/navidrome/credentials', { method: 'DELETE' });
-    toast('Zugang entfernt', 'ok');
+    const info = await api('/api/deemix/arl', {
+      method: 'POST',
+      body: { arl: new FormData(form).get('arl') },
+    });
+    toast(`Bei Deemix angemeldet als ${info.user || 'unbekannt'}`, 'ok');
+    await loadDiagnostics();
+  } catch (exc) {
+    toast(exc.message, 'err');
+    button.disabled = false;
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  const navidrome = event.target.closest('#cred-clear');
+  const deemixArl = event.target.closest('#arl-clear');
+  if (!navidrome && !deemixArl) return;
+  try {
+    await api(navidrome ? '/api/navidrome/credentials' : '/api/deemix/arl',
+              { method: 'DELETE' });
+    toast('Entfernt', 'ok');
     await loadDiagnostics();
   } catch (exc) { toast(exc.message, 'err'); }
 });

@@ -295,6 +295,41 @@ async def delete_navidrome_credentials(user: dict = Depends(security.guarded)) -
     return await navidrome.credentials_info()
 
 
+class ArlBody(BaseModel):
+    arl: str = Field(min_length=8, max_length=512)
+
+
+@router.get("/deemix/arl")
+async def deemix_arl(user: dict = Depends(security.current_user)) -> dict:
+    return await deemix.arl_info()
+
+
+@router.post("/deemix/arl")
+async def set_deemix_arl(body: ArlBody, user: dict = Depends(security.guarded)) -> dict:
+    """ARL hinterlegen, damit der Gateway sich selbst bei Deemix anmelden kann.
+
+    Deemix haelt die Deezer-Sitzung pro HTTP-Sitzung. Dass die Weboberflaeche
+    angemeldet ist, hilft dem Gateway nicht - er ist ein anderer Client.
+    """
+    try:
+        info = await deemix.set_arl(body.arl)
+    except deemix.DeemixUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+    except deemix.DeemixRejected as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    await events.emit(
+        f"Bei Deemix angemeldet als {info.get('user') or 'unbekannt'}", category="system"
+    )
+    return {**info, **await deemix.arl_info()}
+
+
+@router.delete("/deemix/arl")
+async def delete_deemix_arl(user: dict = Depends(security.guarded)) -> dict:
+    await deemix.clear_arl()
+    return await deemix.arl_info()
+
+
 @router.get("/preflight")
 async def preflight_report(user: dict = Depends(security.current_user)) -> dict:
     """Passt die Konfiguration zum System? Vor dem ersten Download aufrufen."""

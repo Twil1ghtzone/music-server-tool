@@ -85,6 +85,26 @@ docker compose logs gateway-api | grep -A2 Start-Passwort
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+### Deemix verbinden (Deezer-ARL)
+
+**Dass die Deemix-Oberfläche angemeldet ist, reicht nicht.** Deemix hält die
+Deezer-Sitzung pro HTTP-Sitzung (`sessionDZ[req.session.id]`) — der Gateway ist
+ein eigener Client mit eigener Sitzung und bekommt `NotLoggedIn`, obwohl im
+Browser oben „You are logged in as …" steht.
+
+Deshalb meldet sich der Gateway selbst an. Den ARL im Dashboard unter
+**Diagnose → Deemix-Anmeldung** eintragen. Er wird vor dem Speichern gegen
+Deezer geprüft und danach nie wieder ausgegeben; im Dashboard stehen nur die
+letzten Zeichen.
+
+Läuft eine Anfrage später in `NotLoggedIn` — etwa weil Deemix neu gestartet
+wurde — meldet sich der Gateway automatisch neu an und versucht es erneut.
+
+Der ARL liegt damit in der Gateway-Datenbank. Das ist derselbe Wert, der
+ohnehin in `./config/deemix` steht, aber es ist eine zweite Kopie: wer das
+nicht möchte, lässt das Feld leer und nimmt in Kauf, dass keine Downloads
+laufen.
+
 ### Navidrome verbinden
 
 Der Gateway braucht selbst Zugriff auf die Navidrome-API, um importierte Titel

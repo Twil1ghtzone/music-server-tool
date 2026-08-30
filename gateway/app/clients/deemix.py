@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 from ..db import db
@@ -122,11 +123,103 @@ async def _try_add(method: str, path: str, style: str, url: str, bitrate: str) -
     return True, f"{method} {path}: angenommen"
 
 
+# ------------------------------------------------------------ Anmeldung
+# Deemix haelt die Deezer-Sitzung PRO HTTP-Sitzung (sessionDZ[req.session.id]).
+# Dass die Weboberflaeche angemeldet ist, nuetzt dem Gateway daher nichts - er
+# ist ein anderer Client mit einer anderen Sitzung und bekommt NotLoggedIn.
+#
+# Deshalb meldet sich der Gateway selbst an. Der httpx-Client ist prozessweit
+# derselbe und behaelt das Sitzungs-Cookie; API und Worker sind aber getrennte
+# Prozesse und melden sich jeweils eigenstaendig an.
+_ARL_KEY = "deemix.arl"
+_ARL_PATTERN = re.compile(r"^[0-9a-f]+$", re.IGNORECASE)
+
+# Statuscodes aus loginArl.ts
+_LOGIN_STATUS = {
+    -1: "Deezer ist von Deemix aus nicht erreichbar",
+    0: "Deezer hat den ARL abgelehnt - vermutlich abgelaufen",
+    1: "angemeldet",
+    2: "bereits angemeldet",
+    3: "angemeldet",
+}
+_LOGIN_OK = (1, 2, 3)
+
+
+async def login(arl: str | None = None) -> dict[str, Any]:
+    """Meldet den Gateway bei Deemix an. Ohne Argument mit dem hinterlegten ARL."""
+    arl = (arl or await db.get_setting(_ARL_KEY) or "").strip()
+    if not arl:
+        raise DeemixRejected(
+            "Kein ARL hinterlegt. Im Dashboard unter Diagnose eintragen - die "
+            "Anmeldung in der Deemix-Oberflaeche gilt nur fuer deren eigene "
+            "Browser-Sitzung, nicht fuer den Gateway."
+        )
+    if not _ARL_PATTERN.match(arl):
+        raise DeemixRejected(
+            "Der ARL besteht ausschliesslich aus Hex-Zeichen (0-9, a-f). "
+            "Offenbar wurde mehr als der reine Wert eingefuegt."
+        )
+
+    try:
+        resp = await http.deemix().post("/api/loginArl", json={"arl": arl}, timeout=30.0)
+    except Exception as exc:
+        raise DeemixUnavailable(f"Deemix nicht erreichbar: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise DeemixRejected(f"Deemix antwortet auf die Anmeldung mit HTTP {resp.status_code}")
+
+    try:
+        data = resp.json()
+    except ValueError:
+        raise DeemixRejected("Antwort auf die Anmeldung ist kein JSON") from None
+
+    status = data.get("status")
+    if status not in _LOGIN_OK:
+        raise DeemixRejected(_LOGIN_STATUS.get(status, f"Anmeldung fehlgeschlagen ({status})"))
+
+    user = data.get("user") or {}
+    log.info("Bei Deemix angemeldet als %s", user.get("name") or "?")
+    return {"status": status, "user": user.get("name"), "message": _LOGIN_STATUS[status]}
+
+
+async def set_arl(arl: str) -> dict[str, Any]:
+    """ARL pruefen und ablegen. Nur was funktioniert, wird gespeichert."""
+    info = await login(arl)
+    await db.set_setting(_ARL_KEY, arl.strip())
+    return info
+
+
+async def clear_arl() -> None:
+    await db.set_setting(_ARL_KEY, "")
+
+
+async def arl_info() -> dict[str, Any]:
+    """Fuer das Dashboard - der Wert selbst wird nie herausgegeben."""
+    arl = (await db.get_setting(_ARL_KEY) or "").strip()
+    return {
+        "configured": bool(arl),
+        "hint": f"…{arl[-6:]}" if len(arl) > 6 else None,
+    }
+
+
 async def add_to_queue(url: str, bitrate: str) -> str:
     """Stellt einen Deezer-Link in die Deemix-Warteschlange.
 
-    Rueckgabe: Beschreibung des genutzten Transports (fuer das Job-Detail).
+    Bei NotLoggedIn wird einmal angemeldet und erneut versucht: der Worker
+    startet ohne Deemix-Sitzung, und die faellt auch aus, wenn Deemix
+    zwischendurch neu gestartet wurde.
     """
+    try:
+        return await _dispatch(url, bitrate)
+    except DeemixRejected as exc:
+        if "NotLoggedIn" not in str(exc) and "notLoggedIn" not in str(exc):
+            raise
+        log.info("Deemix meldet NotLoggedIn - melde mich an und versuche erneut")
+        await login()
+        return await _dispatch(url, bitrate)
+
+
+async def _dispatch(url: str, bitrate: str) -> str:
     stored = await db.get_setting(SETTING_KEY)
     order: list[tuple[str, str, str]] = list(_ADD_CANDIDATES)
     if stored:
