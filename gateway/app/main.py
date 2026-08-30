@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import preflight
@@ -30,6 +30,7 @@ from .events import emit
 from .logging_conf import get_logger, setup_logging
 from .security import ensure_admin_user
 from .subsonic import proxy as subsonic_proxy
+from .subsonic.payload import error_envelope, to_xml
 
 log = get_logger("main")
 
@@ -90,6 +91,31 @@ async def security_headers(request: Request, call_next):
         for key, value in SECURITY_HEADERS.items():
             response.headers.setdefault(key, value)
     return response
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Unerwartete Fehler landen im Protokoll, nicht nur im Container-Log.
+
+    Sonst sieht man im Dashboard nur, dass etwas nicht ging, und muss fuer das
+    Warum auf die Kommandozeile - genau der Bruch, der die Fehlersuche zaeh
+    macht.
+    """
+    log.exception("Unbehandelter Fehler bei %s %s", request.method, request.url.path)
+    await emit(
+        f"{type(exc).__name__} bei {request.method} {request.url.path}: {exc}"[:500],
+        category="fehler",
+        level="error",
+        data={"pfad": request.url.path, "methode": request.method},
+    )
+    if request.url.path.startswith("/rest"):
+        # Subsonic-Clients brauchen eine protokollkonforme Antwort, sonst
+        # bricht ihre Warteschlange ab.
+        return Response(
+            content=to_xml(error_envelope(0, "Interner Fehler im Gateway")),
+            media_type="text/xml; charset=utf-8",
+        )
+    return JSONResponse({"detail": "Interner Fehler - siehe Protokoll"}, status_code=500)
 
 
 @app.get("/healthz", include_in_schema=False)

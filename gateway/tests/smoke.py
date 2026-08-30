@@ -131,6 +131,25 @@ with TestClient(app) as client:
     clear = client.post("/api/queue/clear-failed", headers=headers)
     check("Fehlgeschlagene aufraeumen antwortet", clear.status_code == 200, clear.text[:80])
 
+    logs = client.get("/api/logs?level=all&limit=50")
+    check("Protokoll ist abrufbar",
+          logs.status_code == 200 and len(logs.json()["entries"]) > 0,
+          str(len(logs.json().get("entries", []))) + " Eintraege")
+    check("Protokoll kennt Bereiche", "system" in logs.json()["categories"],
+          str(logs.json()["categories"]))
+    gefiltert = client.get("/api/logs?level=error").json()["entries"]
+    check("Protokollfilter greift", all(e["level"] == "error" for e in gefiltert),
+          f"{len(gefiltert)} Fehler")
+    volltext = client.get("/api/logs?q=Gateway").json()["entries"]
+    check("Protokoll-Volltextsuche greift",
+          all("Gateway" in e["message"] or "Gateway" in (e["data"] or "")
+              for e in volltext), f"{len(volltext)} Treffer")
+
+    # Ohne Navidrome-Zugang laesst sich der Client-Test nicht ausfuehren.
+    test = client.get("/api/client-test")
+    check("Client-Test verlangt Navidrome-Zugang", test.status_code == 409,
+          test.text[:90])
+
     info = client.get("/api/navidrome/credentials")
     check("Zugangs-Status abfragbar",
           info.status_code == 200 and info.json()["configured"] is False, info.text[:110])

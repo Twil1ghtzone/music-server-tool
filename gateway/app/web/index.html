@@ -47,6 +47,7 @@
       <button data-view="library">Bibliothek</button>
       <button data-view="dupes">Duplikate</button>
       <button data-view="tags">Tag-Werkstatt</button>
+      <button data-view="logs">Protokoll</button>
       <button data-view="diagnostics">Diagnose</button>
       <button data-view="account">Konto</button>
     </nav>
@@ -185,6 +186,31 @@
       </form>
       <div class="card">
         <div id="tag-files" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------- Protokoll -->
+    <section data-view="logs" hidden>
+      <header class="page-head">
+        <h2>Protokoll</h2>
+        <div class="actions">
+          <label class="check"><input type="checkbox" id="log-follow" checked> mitlaufen</label>
+          <button data-action="logs-refresh">Neu laden</button>
+        </div>
+      </header>
+      <form id="log-filter" class="card row">
+        <select name="level">
+          <option value="all">alle Stufen</option>
+          <option value="warn">nur Auffälliges</option>
+          <option value="error">nur Fehler</option>
+          <option value="info">nur Info</option>
+        </select>
+        <select name="category"><option value="all">alle Bereiche</option></select>
+        <input name="q" placeholder="Volltextsuche…">
+        <button class="primary" type="submit">Filtern</button>
+      </form>
+      <div class="card">
+        <div id="log-entries" class="log log-full"></div>
       </div>
     </section>
 

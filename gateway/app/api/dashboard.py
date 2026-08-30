@@ -5,6 +5,8 @@ import asyncio
 import json
 import shutil
 
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -293,6 +295,80 @@ async def set_navidrome_credentials(
 async def delete_navidrome_credentials(user: dict = Depends(security.guarded)) -> dict:
     await navidrome.clear_credentials()
     return await navidrome.credentials_info()
+
+
+@router.get("/logs")
+async def logs(
+    user: dict = Depends(security.current_user),
+    level: str = Query("all"),
+    category: str = Query("all"),
+    q: str = Query("", max_length=200),
+    limit: int = Query(300, le=1000),
+) -> dict:
+    return {
+        "entries": await events.search(level, category, q or None, limit),
+        "categories": await events.categories(),
+    }
+
+
+@router.get("/client-test")
+async def client_test(
+    request: Request,
+    user: dict = Depends(security.current_user),
+    q: str = Query("Mark Forster", max_length=200),
+) -> dict:
+    """Fragt den eigenen Subsonic-Endpunkt so ab, wie es ein Musik-Client tut.
+
+    Damit laesst sich die Frage "liegt es am Gateway oder an meinem Client?"
+    beantworten, ohne im Client herumzuraten: was hier herauskommt, bekommt
+    auch Substreamer - vorausgesetzt, es zeigt auf Port 8080.
+    """
+    if not await navidrome.has_credentials_async():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Fuer den Test werden Navidrome-Zugangsdaten gebraucht - "
+            "weiter oben auf dieser Seite eintragen.",
+        )
+
+    params = await navidrome._credentials()
+    params.update({"query": q, "songCount": "20", "f": "json"})
+    # Ueber die Schleife, nicht ueber den externen Namen: der loest im
+    # Container womoeglich nicht auf. Der Port kommt aus der Anfrage, damit
+    # der Test auch beim lokalen Entwicklungsstart und hinter einem
+    # Reverse-Proxy die richtige Stelle trifft.
+    port = request.url.port or (443 if request.url.scheme == "https" else 8080)
+    url = f"http://127.0.0.1:{port}/rest/search3.view"
+
+    try:
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            response = await client.get(url, params=params)
+        body = response.json().get("subsonic-response") or {}
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Der eigene Subsonic-Endpunkt antwortet nicht: {exc}",
+        ) from exc
+
+    if body.get("status") != "ok":
+        error = body.get("error") or {}
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Subsonic-Fehler {error.get('code')}: {error.get('message')}",
+        )
+
+    songs = (body.get("searchResult3") or {}).get("song") or []
+    if not isinstance(songs, list):
+        songs = [songs]
+    virtual = [s for s in songs if str(s.get("id", "")).startswith("mgv-")]
+    local = [s for s in songs if not str(s.get("id", "")).startswith("mgv-")]
+
+    return {
+        "query": q,
+        "local": len(local),
+        "virtual": len(virtual),
+        "beispiele": [s.get("title") for s in virtual[:5]],
+        "url": f"http://<server>:8080/rest/search3.view?query={q}",
+    }
 
 
 class ArlBody(BaseModel):

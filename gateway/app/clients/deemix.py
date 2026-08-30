@@ -173,12 +173,17 @@ async def login(arl: str | None = None) -> dict[str, Any]:
     except ValueError:
         raise DeemixRejected("Antwort auf die Anmeldung ist kein JSON") from None
 
+    from ..events import emit
+
     status = data.get("status")
     if status not in _LOGIN_OK:
-        raise DeemixRejected(_LOGIN_STATUS.get(status, f"Anmeldung fehlgeschlagen ({status})"))
+        grund = _LOGIN_STATUS.get(status, f"Anmeldung fehlgeschlagen ({status})")
+        await emit(f"Deemix-Anmeldung fehlgeschlagen: {grund}", category="deemix", level="error")
+        raise DeemixRejected(grund)
 
     user = data.get("user") or {}
     log.info("Bei Deemix angemeldet als %s", user.get("name") or "?")
+    await emit(f"Bei Deemix angemeldet als {user.get('name') or '?'}", category="deemix")
     return {"status": status, "user": user.get("name"), "message": _LOGIN_STATUS[status]}
 
 

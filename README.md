@@ -85,6 +85,33 @@ docker compose logs gateway-api | grep -A2 Start-Passwort
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+### Warum Navidromes eigene Oberfläche keine ungeladenen Titel zeigt
+
+Das ist keine Fehlfunktion, sondern der Aufbau: der Gateway steht **vor**
+Navidrome. Wer Navidrome auf Port 4533 aufruft, redet direkt mit Navidrome —
+der Gateway ist in diesem Weg gar nicht enthalten und kann dort nichts
+ergänzen.
+
+```
+Client → :8080 Gateway → :4533 Navidrome     ergänzte Titel sichtbar
+Browser →               :4533 Navidrome      nur die echte Bibliothek
+```
+
+Navidrome dazu zu bringen wäre nur möglich, indem man erfundene Einträge in
+seine Datenbank schreibt. Das ist bewusst nicht gebaut: es würde Navidromes
+Scanner, Wiedergabezähler und Playlists mit Titeln füllen, die es als Datei
+nicht gibt — und der erste Full-Scan räumt sie wieder weg.
+
+Ergänzte Titel erscheinen also ausschließlich über Port 8080, und dort auch
+nur in der **Suche** — nicht beim Blättern durch Alben oder Interpreten. Diese
+Ansichten werden unverändert durchgereicht, sonst würde der Katalog die
+Bibliothek fluten.
+
+Ob der Gateway seine Arbeit tut, beantwortet **Diagnose → Was ein Musik-Client
+sieht**: der Test fragt den eigenen Subsonic-Endpunkt genauso ab wie
+Substreamer. Kommen dort Titel mit Marker zurück, liegt ein verbleibendes
+Problem im Client — fast immer zeigt er noch auf 4533.
+
 ### Deemix verbinden (Deezer-ARL)
 
 **Dass die Deemix-Oberfläche angemeldet ist, reicht nicht.** Deemix hält die
@@ -433,6 +460,11 @@ Ob die neue Fassung wirklich ausgeliefert wird:
 ```bash
 curl -s http://localhost:8080/style.css | head -5
 ```
+
+**Protokoll.** Die Seite *Protokoll* zeigt alle Ereignisse mit Filter nach
+Stufe und Bereich sowie Volltextsuche; bei „mitlaufen" laufen neue Einträge
+live ein. Unerwartete Fehler landen dort ebenfalls, nicht nur im
+Container-Log — inklusive Pfad und Methode der Anfrage, die sie ausgelöst hat.
 
 **Startprüfung.** *Diagnose* im Dashboard prüft Pfade, Rechte, Trennung von
 Staging und Bibliothek, ob Import-Moves atomar sind, und ob Navidrome, Deezer,

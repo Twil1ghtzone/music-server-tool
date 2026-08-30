@@ -148,6 +148,7 @@ async function switchView(view) {
     jobs: loadJobs,
     library: loadLibrary,
     dupes: loadDupes,
+    logs: loadLogs,
     diagnostics: loadDiagnostics,
     account: loadAccount,
   };
@@ -186,6 +187,12 @@ function connectStream() {
   stream.addEventListener('log', (event) => {
     const item = JSON.parse(event.data);
     appendLog(item);
+    // Auf der Protokollseite live oben anhängen, solange "mitlaufen" an ist.
+    if (state.view === 'logs' && $('#log-follow')?.checked) {
+      const box = $('#log-entries');
+      box.insertAdjacentHTML('afterbegin', logRow(item));
+      while (box.children.length > 600) box.lastChild.remove();
+    }
     if (item.level === 'error') toast(item.message, 'err');
   });
   stream.addEventListener('state', (event) => {
@@ -574,6 +581,46 @@ $('#tag-files').addEventListener('click', async (event) => {
   row.after(form);
 });
 
+// ------------------------------------------------------------- Protokoll
+function logRow(item) {
+  const zeit = (item.ts || '').replace('T', ' ').slice(0, 19);
+  const daten = item.data && item.data !== 'null'
+    ? `<div class="log-data">${esc(item.data)}</div>` : '';
+  return `<div class="log-line lvl-${esc(item.level)}">
+    <span class="ts">${esc(zeit)}</span>
+    <span class="pill">${esc(item.category)}</span>
+    <span class="log-msg">${esc(item.message)}</span>
+    ${daten}
+  </div>`;
+}
+
+async function loadLogs() {
+  const form = $('#log-filter');
+  const data = new FormData(form);
+  const params = new URLSearchParams({
+    level: data.get('level') || 'all',
+    category: data.get('category') || 'all',
+    q: data.get('q') || '',
+    limit: '500',
+  });
+  const result = await api(`/api/logs?${params}`);
+
+  // Bereichsliste nachziehen, ohne die Auswahl zu verlieren.
+  const select = form.querySelector('[name=category]');
+  const gewaehlt = select.value;
+  select.innerHTML = '<option value="all">alle Bereiche</option>'
+    + (result.categories || []).map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  select.value = gewaehlt;
+
+  $('#log-entries').innerHTML = (result.entries || []).map(logRow).join('')
+    || '<p class="muted">Keine Einträge für diesen Filter.</p>';
+}
+
+$('#log-filter').addEventListener('submit', (event) => {
+  event.preventDefault();
+  loadLogs().catch((exc) => toast(exc.message, 'err'));
+});
+
 // -------------------------------------------------------------- Diagnose
 const CHECK_PILL = { ok: 'ok', warn: 'warn', fail: 'err' };
 const CHECK_LABEL = { ok: 'ok', warn: 'hinweis', fail: 'fehler' };
@@ -646,6 +693,16 @@ async function loadDiagnostics() {
     <div class="card">
       <h3>Deemix-Anmeldung (Deezer-ARL)</h3>
       ${deezer}
+    </div>
+    <div class="card">
+      <h3>Was ein Musik-Client sieht</h3>
+      <p class="muted">Fragt den eigenen Subsonic-Endpunkt genauso ab wie
+        Substreamer. Kommen hier Titel mit Marker zurück, liegt ein Problem
+        im Client — meist zeigt er auf Port 4533 statt 8080.
+        <strong>Navidromes eigene Weboberfläche kann sie nie zeigen</strong>,
+        die läuft am Gateway vorbei.</p>
+      <button data-action="client-test">Test ausführen</button>
+      <div id="client-test-result" style="margin-top:.8rem"></div>
     </div>
     <div class="card">
       <h3>Startprüfung</h3>
@@ -832,6 +889,27 @@ const ACTIONS = {
   'find-dupes': () => api('/api/library/dupes/find', { method: 'POST' }),
   'find-dupes-acoustic': () => api('/api/library/dupes/find?acoustic=true', { method: 'POST' }),
   'diagnostics': async () => { await loadDiagnostics(); return 'Diagnose aktualisiert'; },
+  'logs-refresh': async () => { await loadLogs(); return 'Protokoll aktualisiert'; },
+  'client-test': async () => {
+    const box = $('#client-test-result');
+    box.innerHTML = '<p class="muted">Frage den eigenen Subsonic-Endpunkt ab…</p>';
+    try {
+      const r = await api('/api/client-test?q=Mark%20Forster');
+      box.innerHTML = r.virtual > 0
+        ? `<p class="notice">Der Gateway liefert <strong>${r.local} lokale</strong> und
+             <strong>${r.virtual} noch nicht geladene</strong> Titel für „${esc(r.query)}“.
+             Ein Musik-Client auf Port 8080 sieht genau das.
+             ${r.beispiele.length ? 'Zum Beispiel: ' + esc(r.beispiele.join(', ')) : ''}</p>`
+        : `<p class="notice" style="border-color:var(--warn);background:#2a2413;color:#ffd88a">
+             Der Gateway liefert keine noch nicht geladenen Titel. Prüfe unter
+             Diagnose, ob der Katalog (Deezer) erreichbar ist.</p>`;
+      return 'Test ausgeführt';
+    } catch (exc) {
+      box.innerHTML = `<p class="notice" style="border-color:var(--err);background:#2a1618;color:#ffb4ae">
+                         ${esc(exc.message)}</p>`;
+      throw exc;
+    }
+  },
 };
 
 document.addEventListener('click', async (event) => {

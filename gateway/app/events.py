@@ -57,6 +57,43 @@ async def recent(limit: int = 100) -> list[dict]:
     return list(reversed(rows))
 
 
+async def search(
+    level: str | None = None,
+    category: str | None = None,
+    needle: str | None = None,
+    limit: int = 300,
+) -> list[dict]:
+    """Gefilterte Ansicht fuer die Log-Seite. Neueste zuerst."""
+    where: list[str] = []
+    params: list = []
+    if level and level != "all":
+        # "warn" schliesst Fehler mit ein: wer nach Auffaelligem sucht, will
+        # nicht zwei Filter durchklicken.
+        where.append("level IN ('warn','error')" if level == "warn" else "level = ?")
+        if level != "warn":
+            params.append(level)
+    if category and category != "all":
+        where.append("category = ?")
+        params.append(category)
+    if needle:
+        where.append("(message LIKE ? OR data LIKE ?)")
+        params.extend([f"%{needle}%", f"%{needle}%"])
+
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    return await db.fetch_all(
+        f"SELECT id, ts, level, category, message, data FROM event_log{clause} "
+        f"ORDER BY id DESC LIMIT ?",
+        [*params, limit],
+    )
+
+
+async def categories() -> list[str]:
+    rows = await db.fetch_all(
+        "SELECT DISTINCT category FROM event_log ORDER BY category"
+    )
+    return [row["category"] for row in rows]
+
+
 async def prune() -> None:
     """Haelt das Log klein. Wird vom Worker periodisch aufgerufen."""
     await db.execute(
