@@ -255,6 +255,17 @@ with TestClient(app) as client:
     check("Proxy: Suchbegriff mit * und Anfuehrungszeichen funktioniert",
           len(virtuell2) > 0 and len(lokal) > 0, f"{len(lokal)} lokal, {len(virtuell2)} virtuell")
 
+    # Zugriffe muessen sichtbar sein - das beantwortet "kommt mein Client
+    # ueberhaupt hier an?" ohne Raten.
+    aktivitaet = client.get("/api/client-activity").json()["requests"]
+    check("Client-Zugriffe werden mitgeschrieben", len(aktivitaet) > 0,
+          f"{len(aktivitaet)} Eintraege")
+    check("Zugriff nennt Client und Endpunkt",
+          any(a["client"] == "test" and a["endpoint"] == "search3" for a in aktivitaet),
+          str(aktivitaet[0]) if aktivitaet else "")
+    check("Suchzugriff berichtet das Ergebnis",
+          any("ergaenzt" in (a.get("detail") or "") for a in aktivitaet))
+
     # --- Zugang aus dem Dashboard -----------------------------------------
     client.delete("/api/navidrome/credentials",
                   headers={"X-CSRF-Token": client.cookies.get("mst_csrf", "")})

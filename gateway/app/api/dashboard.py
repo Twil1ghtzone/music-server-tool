@@ -17,6 +17,7 @@ from ..config import settings
 from ..db import db
 from ..logging_conf import get_logger
 from ..services import dedupe, downloader, ffmpeg, jobs, scanner
+from ..subsonic import proxy as subsonic_proxy
 
 log = get_logger("api.dashboard")
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -309,6 +310,16 @@ async def logs(
         "entries": await events.search(level, category, q or None, limit),
         "categories": await events.categories(),
     }
+
+
+@router.get("/client-activity")
+async def client_activity(user: dict = Depends(security.current_user)) -> dict:
+    """Die letzten Zugriffe von Musik-Clients auf den Subsonic-Endpunkt.
+
+    Beantwortet ohne Raten, ob ein Client ueberhaupt hier ankommt. Bleibt die
+    Liste leer, waehrend im Client gesucht wird, zeigt er woanders hin.
+    """
+    return {"requests": subsonic_proxy.recent_activity()}
 
 
 @router.get("/client-test")

@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -31,6 +33,7 @@ from starlette.background import BackgroundTask
 
 from ..clients import deezer, http
 from ..config import settings
+from ..events import emit
 from ..logging_conf import get_logger
 from ..services import ffmpeg, jobs
 from . import auth, ids, payload
@@ -59,6 +62,30 @@ INTERCEPTED = {
 # Wie lange der Proxy im Modus "stream" die Verbindung offen haelt.
 STREAM_HOLD_SECONDS = 150.0
 NOTICE_PACE_SECONDS = 7.0
+
+# Ringpuffer der letzten Client-Zugriffe.
+#
+# Der Grund: die Frage "spricht mein Musik-Client ueberhaupt mit dem Gateway
+# oder direkt mit Navidrome?" war bisher nur durch Raten zu beantworten. Steht
+# hier nichts, waehrend im Client gesucht wird, ist die Antwort eindeutig.
+# Bewusst im Speicher und klein - das ist Diagnose, keine Buchfuehrung.
+_ACTIVITY_MAX = 60
+_activity: deque[dict[str, Any]] = deque(maxlen=_ACTIVITY_MAX)
+
+
+def _note_activity(name: str, flat: dict[str, str], detail: str = "") -> None:
+    _activity.appendleft({
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+        "endpoint": name,
+        "client": flat.get("c") or "?",
+        "user": flat.get("u") or "?",
+        "query": flat.get("query"),
+        "detail": detail,
+    })
+
+
+def recent_activity() -> list[dict[str, Any]]:
+    return list(_activity)
 
 
 # --------------------------------------------------------------- Parameter
@@ -153,6 +180,7 @@ async def subsonic_entry(endpoint: str, request: Request) -> Response:
     flat = {k: v for k, v in items}
 
     if name not in INTERCEPTED:
+        _note_activity(name, flat, "durchgereicht")
         return await passthrough(request, endpoint, items)
 
     handler = {
@@ -232,6 +260,22 @@ async def _handle_search(request, endpoint, name, items, flat) -> Response:
     additions = await _virtual_additions(candidates, local_songs)
     if additions:
         result["song"] = local_songs + additions
+
+    bericht = (f"{len(local_songs)} lokal, {len(candidates)} im Katalog, "
+               f"{len(additions)} ergaenzt")
+    log.info("Suche '%s' von %s: %s", query, flat.get("c") or "?", bericht)
+    _note_activity(name, flat, bericht)
+
+    # Der auffaellige Fall kommt ins Protokoll: gesucht, aber nichts ergaenzt.
+    # Haeufig ist dann der Katalog nicht erreichbar oder alles schon lokal da.
+    if query and not additions:
+        await emit(
+            f"Suche '{query}' ergaenzte nichts ({bericht})",
+            category="suche",
+            level="warn",
+            data={"client": flat.get("c"), "query": query},
+        )
+
     return payload.render(document, fmt, flat.get("callback"))
 
 

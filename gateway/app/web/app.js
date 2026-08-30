@@ -695,6 +695,14 @@ async function loadDiagnostics() {
       ${deezer}
     </div>
     <div class="card">
+      <h3>Zugriffe von Musik-Clients</h3>
+      <p class="muted">Die letzten Anfragen, die tatsächlich hier ankommen.
+        Bleibt die Liste leer, während du im Client suchst, zeigt der Client
+        nicht auf den Gateway.</p>
+      <button data-action="client-activity">Aktualisieren</button>
+      <div id="client-activity" class="list" style="margin-top:.8rem"></div>
+    </div>
+    <div class="card">
       <h3>Was ein Musik-Client sieht</h3>
       <p class="muted">Fragt den eigenen Subsonic-Endpunkt genauso ab wie
         Substreamer. Kommen hier Titel mit Marker zurück, liegt ein Problem
@@ -890,6 +898,25 @@ const ACTIONS = {
   'find-dupes-acoustic': () => api('/api/library/dupes/find?acoustic=true', { method: 'POST' }),
   'diagnostics': async () => { await loadDiagnostics(); return 'Diagnose aktualisiert'; },
   'logs-refresh': async () => { await loadLogs(); return 'Protokoll aktualisiert'; },
+  'client-activity': async () => {
+    const { requests } = await api('/api/client-activity');
+    $('#client-activity').innerHTML = requests.length
+      ? requests.map((r) => `
+          <div class="item">
+            <div class="main">
+              <div class="title">${esc(r.endpoint)}${r.query ? ` — „${esc(r.query)}“` : ''}</div>
+              <div class="sub">${esc(r.ts)} · ${esc(r.detail || '')}</div>
+            </div>
+            <div class="side">
+              <span class="pill">${esc(r.client)}</span>
+              <span class="muted">${esc(r.user)}</span>
+            </div>
+          </div>`).join('')
+      : `<div class="item"><div class="main"><div class="sub">Noch kein
+           Musik-Client hier angekommen. Such einmal im Client und lade dann
+           neu — bleibt es leer, zeigt er auf den falschen Port.</div></div></div>`;
+    return `${requests.length} Zugriff(e)`;
+  },
   'client-test': async () => {
     const box = $('#client-test-result');
     box.innerHTML = '<p class="muted">Frage den eigenen Subsonic-Endpunkt ab…</p>';
