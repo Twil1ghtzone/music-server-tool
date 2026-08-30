@@ -52,7 +52,8 @@ ID_PARAMS = {
 }
 
 INTERCEPTED = {
-    "search2", "search3", "getSong", "getAlbum", "stream", "download", "getCoverArt",
+    "search2", "search3", "getSong", "getAlbum", "getArtist", "stream", "download",
+    "getCoverArt",
 }
 
 # Wie lange der Proxy im Modus "stream" die Verbindung offen haelt.
@@ -159,6 +160,7 @@ async def subsonic_entry(endpoint: str, request: Request) -> Response:
         "search3": _handle_search,
         "getSong": _handle_get_song,
         "getAlbum": _handle_get_album,
+        "getArtist": _handle_get_artist,
         "stream": _handle_stream,
         "download": _handle_stream,
         "getCoverArt": _handle_cover,
@@ -168,7 +170,9 @@ async def subsonic_entry(endpoint: str, request: Request) -> Response:
 
 # ------------------------------------------------------------------ Suche
 async def _handle_search(request, endpoint, name, items, flat) -> Response:
-    query = (flat.get("query") or "").strip().strip('"')
+    # Subsonic-Clients haengen dem Suchbegriff gern ein * an und setzen ihn in
+    # Anfuehrungszeichen. Navidrome versteht das, der Katalog nicht.
+    query = (flat.get("query") or "").strip().strip('"').rstrip("*").strip()
     fmt = payload.wanted_format(flat)
     song_count = _int_param(flat, "songCount", 20)
     offset = _int_param(flat, "songOffset", 0)
@@ -319,6 +323,45 @@ async def _handle_get_album(request, endpoint, name, items, flat) -> Response:
     }
     return payload.render(
         payload.envelope({"album": album}), payload.wanted_format(flat), flat.get("callback")
+    )
+
+
+# -------------------------------------------------------------- getArtist
+async def _handle_get_artist(request, endpoint, name, items, flat) -> Response:
+    """Ein virtueller Titel verweist auf einen virtuellen Interpreten.
+
+    Manche Clients loesen artistId auf, bevor sie einen Treffer anzeigen.
+    Kommt dabei ein Fehler zurueck, verschwindet der Eintrag stillschweigend
+    aus der Liste - deshalb wird auch diese ID beantwortet.
+    """
+    artist_id = flat.get("id") or ""
+    if not artist_id.endswith("-artist") or not ids.is_virtual(artist_id):
+        return await passthrough(request, endpoint, items)
+
+    vid = artist_id[: -len("-artist")]
+    row = await ids.load(vid)
+    if not row:
+        return payload.error(payload.E_NOT_FOUND, "Interpret nicht gefunden", flat)
+
+    artist = {
+        "id": artist_id,
+        "name": row.get("album_artist") or row.get("artist") or "",
+        "coverArt": vid,
+        "albumCount": 1,
+        "album": [{
+            "id": f"{vid}-album",
+            "name": row.get("album") or row.get("title") or "",
+            "artist": row.get("artist") or "",
+            "artistId": artist_id,
+            "coverArt": vid,
+            "songCount": 1,
+            "duration": int(row.get("duration") or 0),
+            "created": row.get("created_at") or "1970-01-01T00:00:00.000Z",
+            "year": row.get("year") or 0,
+        }],
+    }
+    return payload.render(
+        payload.envelope({"artist": artist}), payload.wanted_format(flat), flat.get("callback")
     )
 
 

@@ -83,8 +83,48 @@ class FakeNavidrome(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
 
+class FakeDeemix(BaseHTTPRequestHandler):
+    """Antwortet wie der echte Fork: immer HTTP 200, Ergebnis im Rumpf.
+
+    Genau darauf ist der Gateway einmal hereingefallen - eine Ablehnung sah
+    aus wie ein Erfolg.
+    """
+
+    mode = "reject"  # "reject" | "accept"
+
+    def log_message(self, *args):
+        pass
+
+    def _send(self, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if urlparse(self.path).path != "/api/addToQueue":
+            self.send_response(404)
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(length)
+        if FakeDeemix.mode == "accept":
+            self._send({"result": True, "data": {"obj": {"id": "1"}}})
+        else:
+            self._send({"result": False, "errid": "NotLoggedIn",
+                        "data": {"url": "…", "bitrate": 3}})
+
+    def do_GET(self):
+        self._send({"result": True, "queue": []})
+
+
+DEEMIX_PORT = 45331
 server = ThreadingHTTPServer(("127.0.0.1", NAV_PORT), FakeNavidrome)
 threading.Thread(target=server.serve_forever, daemon=True).start()
+deemix_server = ThreadingHTTPServer(("127.0.0.1", DEEMIX_PORT), FakeDeemix)
+threading.Thread(target=deemix_server.serve_forever, daemon=True).start()
 
 # ------------------------------------------------------------- Umgebung
 BASE = Path(tempfile.mkdtemp(prefix="mst-proxy-"))
@@ -98,13 +138,14 @@ os.environ.update(
     QUARANTINE_DIR=str(BASE / "quarantine"),
     NAVIDROME_URL=f"http://127.0.0.1:{NAV_PORT}",
     NAVIDROME_USER=NAV_USER, NAVIDROME_PASSWORD=NAV_PASSWORD,
-    DEEMIX_URL="http://127.0.0.1:59992",
+    DEEMIX_URL=f"http://127.0.0.1:{DEEMIX_PORT}",
     GATEWAY_ADMIN_USER="admin", GATEWAY_ADMIN_PASSWORD="devpassword123",
     GATEWAY_SESSION_SECRET="0" * 64,
 )
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.errors import PermanentError  # noqa: E402
 from app.main import app  # noqa: E402
 
 failures: list[str] = []
@@ -175,11 +216,75 @@ with TestClient(app) as client:
     ).json()["subsonic-response"]["song"]
     check("Proxy: getSong loest virtuelle ID auf", song["id"] == virtuell[0]["id"])
 
+    # Manche Clients loesen albumId und artistId auf, bevor sie einen Treffer
+    # anzeigen. Ein Fehler dabei laesst den Eintrag stillschweigend
+    # verschwinden - beide muessen also antworten.
+    album = client.get(
+        "/rest/getAlbum.view", params=subsonic(id=song["albumId"])
+    ).json()["subsonic-response"]
+    check("Proxy: getAlbum auf virtuelle ID antwortet",
+          album.get("status") == "ok" and album["album"]["songCount"] == 1,
+          str(album.get("error", "")))
+
+    artist = client.get(
+        "/rest/getArtist.view", params=subsonic(id=song["artistId"])
+    ).json()["subsonic-response"]
+    check("Proxy: getArtist auf virtuelle ID antwortet",
+          artist.get("status") == "ok" and artist["artist"]["name"],
+          str(artist.get("error", "")))
+
+    # Subsonic-Clients haengen dem Suchbegriff gern ein * an.
+    body = client.get("/rest/search3.view", params=subsonic('"mark forster*"')).json()
+    lokal, virtuell2 = split(body["subsonic-response"]["searchResult3"]["song"])
+    check("Proxy: Suchbegriff mit * und Anfuehrungszeichen funktioniert",
+          len(virtuell2) > 0 and len(lokal) > 0, f"{len(lokal)} lokal, {len(virtuell2)} virtuell")
+
     # --- Zugang aus dem Dashboard -----------------------------------------
     client.delete("/api/navidrome/credentials",
                   headers={"X-CSRF-Token": client.cookies.get("mst_csrf", "")})
 
+# --- Deemix: Ablehnung mit HTTP 200 ---------------------------------------
+import asyncio  # noqa: E402
+
+from app.clients import deemix  # noqa: E402
+
+
+async def _deemix_cases() -> tuple[str, str]:
+    # Eigene Datenbank: die der App ist nach dem TestClient-Block zu, und
+    # add_to_queue liest den gemerkten Transport aus der setting-Tabelle.
+    from app import db as _dbmod
+
+    _dbmod.configure(BASE / "data" / "deemix.db")
+    await _dbmod.db.connect()
+
+    FakeDeemix.mode = "reject"
+    try:
+        await deemix.add_to_queue("https://www.deezer.com/track/1", "3")
+        abgelehnt = "faelschlich angenommen"
+    except deemix.DeemixRejected as exc:
+        abgelehnt = str(exc)
+    except Exception as exc:
+        abgelehnt = f"falscher Fehlertyp: {type(exc).__name__}"
+
+    FakeDeemix.mode = "accept"
+    try:
+        angenommen = await deemix.add_to_queue("https://www.deezer.com/track/1", "3")
+    except Exception as exc:
+        angenommen = f"FEHLER {exc}"
+    await _dbmod.db.close()
+    return abgelehnt, angenommen
+
+
+_rejected, _accepted = asyncio.run(_deemix_cases())
+check("Deemix: Ablehnung mit HTTP 200 wird erkannt",
+      "NotLoggedIn" in _rejected, _rejected[:90])
+check("Deemix: Ablehnung ist ein permanenter Fehler",
+      issubclass(deemix.DeemixRejected, PermanentError))
+check("Deemix: Annahme wird als Erfolg gewertet",
+      "angenommen" in _accepted, _accepted[:70])
+
 server.shutdown()
+deemix_server.shutdown()
 print()
 if failures:
     print(f"{len(failures)} fehlgeschlagen: {failures}")

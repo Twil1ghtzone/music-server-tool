@@ -20,6 +20,7 @@ import json
 from typing import Any
 
 from ..db import db
+from ..errors import PermanentError
 from ..logging_conf import get_logger
 from . import http
 
@@ -29,7 +30,27 @@ SETTING_KEY = "deemix.transport"
 
 
 class DeemixUnavailable(RuntimeError):
-    pass
+    """Kein Endpunkt hat die Anfrage angenommen."""
+
+
+class DeemixRejected(PermanentError):
+    """Deemix hat die Anfrage bewusst abgelehnt.
+
+    Typisch NotLoggedIn (ARL fehlt oder ist abgelaufen) oder CantStream (der
+    Titel ist mit diesem Konto oder in dieser Region nicht abrufbar). Beides
+    aendert sich nicht durch Wiederholen - dafuer muss ein Mensch ran.
+    """
+
+
+# Was Deemix in errid meldet, in Klartext samt Handlungsanweisung.
+_ERROR_HINTS = {
+    "NotLoggedIn": "Deemix ist nicht bei Deezer angemeldet. Der ARL fehlt oder "
+                   "ist abgelaufen - in der Deemix-Oberflaeche neu setzen.",
+    "CantStream": "Deezer gibt diesen Titel fuer das hinterlegte Konto nicht her "
+                  "(Region oder Abo-Stufe).",
+    "wrongURL": "Deemix kann mit dieser URL nichts anfangen.",
+    "notLoggedIn": "Deemix ist nicht bei Deezer angemeldet (ARL pruefen).",
+}
 
 
 # (Methode, Pfad, Art der Parameteruebergabe)
@@ -53,12 +74,25 @@ _INFO_CANDIDATES: tuple[str, ...] = (
 
 
 def _payload(url: str, bitrate: str) -> dict[str, Any]:
-    # Verschiedene Forks erwarten verschiedene Schluessel - wir liefern alle,
-    # unbekannte werden serverseitig ignoriert.
-    return {"url": url, "urls": [url], "bitrate": str(bitrate), "quality": str(bitrate)}
+    # Der Referenz-Fork liest req.body.url (String) und req.body.bitrate.
+    # Die uebrigen Schluessel schaden nicht und decken abweichende Forks ab.
+    body: dict[str, Any] = {"url": url, "urls": [url]}
+    try:
+        body["bitrate"] = int(bitrate)
+    except (TypeError, ValueError):
+        body["bitrate"] = str(bitrate)
+    body["quality"] = body["bitrate"]
+    return body
 
 
 async def _try_add(method: str, path: str, style: str, url: str, bitrate: str) -> tuple[bool, str]:
+    """Genau ein Kandidat. Rueckgabe: (angenommen, Beschreibung).
+
+    Wichtig und lange falsch gemacht: Deemix antwortet auch im Fehlerfall mit
+    HTTP 200 und teilt das Ergebnis im Rumpf mit - {"result": false, "errid":
+    "NotLoggedIn"}. Wer nur den Statuscode prueft, haelt eine Ablehnung fuer
+    einen Erfolg und wartet danach zehn Minuten auf eine Datei, die nie kommt.
+    """
     body = _payload(url, bitrate)
     try:
         client = http.deemix()
@@ -66,17 +100,26 @@ async def _try_add(method: str, path: str, style: str, url: str, bitrate: str) -
             resp = await client.request(method, path, json=body)
         else:
             resp = await client.request(
-                method, path, params={"url": url, "bitrate": str(bitrate)}
+                method, path, params={"url": url, "bitrate": str(body["bitrate"])}
             )
     except Exception as exc:
         return False, f"{method} {path}: {exc}"
 
-    if resp.status_code in (200, 201, 202, 204):
-        text = (resp.text or "")[:200]
-        if "error" in text.lower() and "false" not in text.lower():
-            return False, f"{method} {path}: HTTP {resp.status_code} -> {text}"
-        return True, f"{method} {path}: HTTP {resp.status_code}"
-    return False, f"{method} {path}: HTTP {resp.status_code}"
+    if resp.status_code not in (200, 201, 202, 204):
+        return False, f"{method} {path}: HTTP {resp.status_code}"
+
+    try:
+        data = resp.json()
+    except ValueError:
+        # Kein JSON: unter diesem Pfad liegt die Weboberflaeche, nicht die API.
+        return False, f"{method} {path}: Antwort ist kein JSON"
+
+    if isinstance(data, dict) and data.get("result") is False:
+        errid = str(data.get("errid") or "unbekannt")
+        hint = _ERROR_HINTS.get(errid, "")
+        raise DeemixRejected(f"Deemix lehnt ab ({errid}). {hint}".strip())
+
+    return True, f"{method} {path}: angenommen"
 
 
 async def add_to_queue(url: str, bitrate: str) -> str:
@@ -97,6 +140,9 @@ async def add_to_queue(url: str, bitrate: str) -> str:
 
     errors: list[str] = []
     for candidate in order:
+        # DeemixRejected fliegt bewusst durch: der Endpunkt stimmt, Deemix
+        # will nur nicht. Weitere Pfade zu probieren waere sinnlos und wuerde
+        # die eigentliche Ursache hinter einer Sammelmeldung verstecken.
         ok, detail = await _try_add(*candidate, url=url, bitrate=bitrate)
         if ok:
             await db.set_setting(SETTING_KEY, json.dumps(list(candidate)))
