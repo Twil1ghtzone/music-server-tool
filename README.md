@@ -377,6 +377,21 @@ schreibt der API-Container beim Start ins Log:
 docker compose logs gateway-api | grep PRUEFUNG
 ```
 
+**`Conflict. The container name "/deemix" is already in use`.** Tritt beim
+Umstieg auf: die alten Container gehören noch zum vorherigen Compose-Projekt
+(dessen Name sich aus dem Verzeichnisnamen ergab), diese Datei setzt
+`name: music-server-tool`. Damit ist es für Docker ein anderes Projekt, und
+`container_name` ist Docker-weit eindeutig. Alte Container entfernen, dann neu
+starten:
+
+```bash
+docker rm -f navidrome deemix
+```
+
+Gefahrlos: Navidromes Datenbank liegt in `./data/navidrome`, die
+Deemix-Konfiguration samt ARL in `./config/deemix` — beides Bind-Mounts auf dem
+Host, nichts davon steckt im Container.
+
 **Wenn Downloads nicht ankommen.** *Diagnose* im Dashboard zeigt, welche
 Deemix-Endpunkte antworten. Häufigste Ursache ist ein abgelaufener ARL;
 zweithäufigste ein Fork, der einen anderen Pfad erwartet — der lässt sich dort
