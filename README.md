@@ -85,6 +85,29 @@ docker compose logs gateway-api | grep -A2 Start-Passwort
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+### Variante: Clients müssen gar nichts umstellen
+
+Wer seine Geräte nicht anfassen will — oder wer immer wieder in die
+Port-Falle tritt — lässt den Gateway einfach **auf 4533 antworten**. Dann läuft
+jeder vorhandene Client unverändert durch ihn hindurch. In
+`docker-compose.yml` beide Kommentare umdrehen:
+
+```yaml
+  navidrome:
+    ports:
+      # - 4533:4533
+      - 4534:4533          # Navidromes Weboberfläche zieht auf 4534
+
+  gateway-api:
+    ports:
+      - 8080:8080
+      - 4533:8080          # Gateway übernimmt den Client-Port
+```
+
+Danach `docker compose up -d`. Musik-Clients bleiben auf `…:4533` und sehen ab
+sofort auch die ergänzten Titel; Navidromes eigene Oberfläche erreichst du
+unter `…:4534`, das Dashboard weiterhin unter `…:8080`.
+
 ### Warum Navidromes eigene Oberfläche keine ungeladenen Titel zeigt
 
 Das ist keine Fehlfunktion, sondern der Aufbau: der Gateway steht **vor**

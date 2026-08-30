@@ -98,7 +98,17 @@ services:
     container_name: navidrome
     user: 0:0 # <--- TrueNAS SCALE Apps User & Group
     ports:
+      # Standard: Navidrome bleibt auf 4533, der Gateway liegt auf 8080.
+      # Musik-Clients muessen dann auf 8080 zeigen, sonst sehen sie nur die
+      # vorhandene Bibliothek - Port 4533 geht am Gateway vorbei.
       - 4533:4533
+      #
+      # VARIANTE "Clients muessen nichts umstellen":
+      # Die naechste Zeile aktivieren, die obige auskommentieren, und beim
+      # Dienst gateway-api dasselbe tun. Der Gateway uebernimmt dann 4533,
+      # jeder vorhandene Client laeuft ohne Aenderung durch ihn hindurch, und
+      # Navidromes eigene Weboberflaeche liegt danach auf 4534.
+      # - 4534:4533
     restart: unless-stopped
     environment:
       ND_SCANSCHEDULE: 1h
@@ -145,6 +155,11 @@ services:
       GATEWAY_ROLE: api
     ports:
       - 8080:8080
+      # VARIANTE "Clients muessen nichts umstellen": zusaetzlich freischalten,
+      # dann erreicht jeder auf 4533 eingerichtete Client den Gateway. Bei
+      # navidrome muss dann 4533 auf 4534 umgestellt werden, sonst streiten
+      # sich beide um denselben Port.
+      # - 4533:8080
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3).status==200 else 1)"]
       interval: 30s
