@@ -78,6 +78,7 @@ async def claim() -> dict[str, Any] | None:
              WHERE id = (
                    SELECT id FROM job
                     WHERE state = 'pending'
+                      AND (available_at IS NULL OR available_at <= datetime('now'))
                     ORDER BY priority ASC, id ASC
                     LIMIT 1)
             RETURNING *
@@ -111,17 +112,42 @@ async def succeed(job_id: int, detail: str | None = None) -> None:
     )
 
 
+def backoff_seconds(attempts: int) -> int:
+    """30 s, 2 min, 8 min, ... gedeckelt bei einer halben Stunde.
+
+    Ohne Wartezeit laufen alle Versuche in derselben Sekunde durch: der Worker
+    holt den Job sofort wieder aus der Queue, und nach drei Zeilen im Log ist
+    er endgueltig tot - lange bevor ein Dienst hochgefahren oder ein Zugang
+    hinterlegt sein koennte.
+    """
+    return min(1800, 30 * (4 ** max(0, attempts - 1)))
+
+
 async def fail(job_id: int, error: str, *, retry: bool = True) -> None:
     """Setzt zurueck auf pending, solange Versuche uebrig sind."""
     row = await db.fetch_one("SELECT attempts, max_attempts FROM job WHERE id = ?", (job_id,))
     can_retry = retry and row is not None and row["attempts"] < row["max_attempts"]
+
+    if can_retry:
+        delay = backoff_seconds(int(row["attempts"]))
+        await db.execute(
+            "UPDATE job SET state = 'pending', last_error = ?, "
+            "available_at = datetime('now', ?), finished_at = NULL, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (error[:2000], f"+{delay} seconds", job_id),
+        )
+        log.info(
+            "Job %s fehlgeschlagen, naechster Versuch in %d s: %s",
+            job_id, delay, error[:200],
+        )
+        return
+
     await db.execute(
-        "UPDATE job SET state = ?, last_error = ?, updated_at = datetime('now'), "
-        "finished_at = CASE WHEN ? THEN NULL ELSE datetime('now') END WHERE id = ?",
-        ("pending" if can_retry else "failed", error[:2000], 1 if can_retry else 0, job_id),
+        "UPDATE job SET state = 'failed', last_error = ?, "
+        "finished_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
+        (error[:2000], job_id),
     )
-    if not can_retry:
-        log.warning("Job %s endgueltig fehlgeschlagen: %s", job_id, error[:300])
+    log.warning("Job %s endgueltig fehlgeschlagen: %s", job_id, error[:300])
 
 
 async def cancel(job_id: int) -> bool:
@@ -134,9 +160,10 @@ async def cancel(job_id: int) -> bool:
 
 
 async def retry(job_id: int) -> bool:
+    # available_at zuruecksetzen: "Wiederholen" heisst jetzt, nicht irgendwann.
     changed = await db.execute(
         "UPDATE job SET state = 'pending', attempts = 0, last_error = NULL, "
-        "finished_at = NULL, updated_at = datetime('now') "
+        "available_at = NULL, finished_at = NULL, updated_at = datetime('now') "
         "WHERE id = ? AND state IN ('failed','cancelled')",
         (job_id,),
     )
@@ -147,7 +174,8 @@ async def requeue_orphans() -> int:
     """Beim Worker-Start: Jobs, die beim letzten Absturz 'running' waren,
     zurueck in die Queue."""
     return await db.execute(
-        "UPDATE job SET state = 'pending', updated_at = datetime('now') WHERE state = 'running'"
+        "UPDATE job SET state = 'pending', available_at = NULL, "
+        "updated_at = datetime('now') WHERE state = 'running'"
     )
 
 

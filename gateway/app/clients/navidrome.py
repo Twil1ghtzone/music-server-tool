@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 
 from ..config import settings
+from ..errors import PermanentError
 from ..logging_conf import get_logger
 from . import http
 
@@ -93,8 +94,13 @@ async def remember_credentials(params: dict[str, str]) -> None:
         log.debug("Zugangsdaten nicht gespeichert: %s", exc)
 
 
-class NoCredentials(NavidromeError):
-    """Weder eigenes Passwort noch geliehenes Token vorhanden."""
+class NoCredentials(NavidromeError, PermanentError):
+    """Weder eigenes Passwort noch geliehenes Token vorhanden.
+
+    Ausdruecklich permanent: daran aendert sich nichts, solange sich kein
+    Client angemeldet hat. Ein Job, der das dreimal hintereinander versucht,
+    hilft niemandem.
+    """
 
 
 async def _credentials() -> dict[str, str]:

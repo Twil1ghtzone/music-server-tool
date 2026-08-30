@@ -34,7 +34,9 @@ os.environ.update(
     # Absichtlich tote Ports: der Test darf keine Nachbarn brauchen.
     NAVIDROME_URL="http://127.0.0.1:59991",
     DEEMIX_URL="http://127.0.0.1:59992",
-    NAVIDROME_PASSWORD="x",
+    # Bewusst leer: das ist der Auslieferungszustand. Der Gateway muss auch
+    # ohne eigenes Navidrome-Passwort sauber hochkommen.
+    NAVIDROME_PASSWORD="",
     GATEWAY_ADMIN_USER="admin",
     GATEWAY_ADMIN_PASSWORD="supersecret123",
     GATEWAY_SESSION_SECRET="0" * 64,
@@ -43,8 +45,10 @@ os.environ.update(
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from app.clients import navidrome  # noqa: E402
+from app.errors import PermanentError  # noqa: E402
 from app.main import app  # noqa: E402
-from app.services import dedupe, downloader  # noqa: E402
+from app.services import dedupe, downloader, jobs  # noqa: E402
 from app.subsonic import ids, payload  # noqa: E402
 
 failures: list[str] = []
@@ -108,6 +112,11 @@ with TestClient(app) as client:
     check("Dedup-Anwenden ist gesperrt", blocked.status_code == 403, blocked.text[:100])
     blocked = client.patch("/api/library/files/1/tags", json={"title": "x"}, headers=headers)
     check("Tag-Schreiben ist gesperrt", blocked.status_code == 403, blocked.text[:100])
+
+    # Ohne Navidrome-Zugangsdaten darf gar kein Scan-Job entstehen.
+    blocked = client.post("/api/scan", json={"full": False}, headers=headers)
+    check("Navidrome-Scan ohne Zugangsdaten -> 409", blocked.status_code == 409,
+          blocked.text[:110])
 
     report = client.get("/api/preflight")
     check("Preflight antwortet", report.status_code == 200, report.text[:100])
@@ -198,6 +207,17 @@ other = [random.getrandbits(32) for _ in range(200)]
 check("Fingerprint: fremder Titel unter der Schwelle",
       dedupe.similarity(a, other) < dedupe.ACOUSTIC_MATCH_THRESHOLD,
       str(dedupe.similarity(a, other)))
+
+# Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
+check("NoCredentials ist ein permanenter Fehler",
+      issubclass(navidrome.NoCredentials, PermanentError))
+
+# Backoff: ohne Wartezeit laufen alle Versuche in derselben Sekunde durch.
+check("Backoff waechst", jobs.backoff_seconds(1) < jobs.backoff_seconds(2)
+      < jobs.backoff_seconds(3), f"{[jobs.backoff_seconds(n) for n in (1,2,3)]}")
+check("Erster Versuch wartet mindestens 30 s", jobs.backoff_seconds(1) >= 30)
+check("Backoff ist gedeckelt", jobs.backoff_seconds(20) <= 1800,
+      str(jobs.backoff_seconds(20)))
 
 # Ohne gesetztes Geheimnis muss eines erzeugt UND behalten werden, sonst
 # meldet jeder Neustart alle Browser ab.

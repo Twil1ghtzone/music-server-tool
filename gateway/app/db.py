@@ -115,12 +115,16 @@ CREATE TABLE IF NOT EXISTS job (
     max_attempts INTEGER NOT NULL DEFAULT 3,
     last_error   TEXT,
     dedupe_key   TEXT UNIQUE,
+    -- Fruehester naechster Versuch. Ohne das laufen alle Wiederholungen
+    -- innerhalb einer Sekunde durch und der Job ist tot, bevor die Ursache
+    -- ueberhaupt behoben sein koennte.
+    available_at TEXT,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
     started_at   TEXT,
     finished_at  TEXT
 );
-CREATE INDEX IF NOT EXISTS ix_job_claim ON job(state, priority, id);
+CREATE INDEX IF NOT EXISTS ix_job_claim ON job(state, available_at, priority, id);
 CREATE INDEX IF NOT EXISTS ix_job_updated ON job(updated_at DESC);
 
 -- ------------------------------------------------------- Bibliotheks-Index
@@ -205,7 +209,17 @@ CREATE TABLE IF NOT EXISTS setting (
 );
 """
 
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
+
+# Schritte fuer bereits bestehende Datenbanken. SCHEMA legt neue Datenbanken
+# gleich vollstaendig an, deshalb laufen diese Schritte nur bei aelteren.
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    2: (
+        "ALTER TABLE job ADD COLUMN available_at TEXT",
+        "DROP INDEX IF EXISTS ix_job_claim",
+        "CREATE INDEX IF NOT EXISTS ix_job_claim ON job(state, available_at, priority, id)",
+    ),
+}
 
 
 class Database:
@@ -239,11 +253,27 @@ class Database:
         await conn.executescript(SCHEMA)
         cur = await conn.execute("SELECT version FROM schema_version LIMIT 1")
         row = await cur.fetchone()
+
         if row is None:
+            # Frische Datenbank: SCHEMA ist bereits der aktuelle Stand.
             await conn.execute("INSERT INTO schema_version(version) VALUES (?)", (CURRENT_VERSION,))
-        elif row["version"] < CURRENT_VERSION:
-            # Platz fuer zukuenftige Migrationsschritte.
-            await conn.execute("UPDATE schema_version SET version = ?", (CURRENT_VERSION,))
+            return
+
+        version = int(row["version"])
+        if version >= CURRENT_VERSION:
+            return
+
+        for step in range(version + 1, CURRENT_VERSION + 1):
+            for statement in MIGRATIONS.get(step, ()):
+                try:
+                    await conn.execute(statement)
+                except Exception as exc:
+                    # "duplicate column name" heisst: schon vorhanden, passt.
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+            log.info("Schema auf Version %d migriert", step)
+
+        await conn.execute("UPDATE schema_version SET version = ?", (CURRENT_VERSION,))
 
     async def close(self) -> None:
         for conn in self._all:

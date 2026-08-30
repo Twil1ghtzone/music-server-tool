@@ -198,6 +198,16 @@ async def request_download(
 
 @router.post("/scan")
 async def trigger_scan(body: ScanBody, user: dict = Depends(security.guarded)) -> dict:
+    # Ohne Zugangsdaten waere der Job zum Scheitern verurteilt. Lieber hier
+    # sagen warum, als drei Fehlermeldungen im Ereignisprotokoll erzeugen.
+    if not navidrome.has_credentials():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Navidrome-Scan braucht Zugangsdaten. Melde dich einmal mit einem "
+            "Musik-Client auf Port 8080 an - der Gateway uebernimmt dessen Token. "
+            "Alternativ NAVIDROME_PASSWORD setzen. Navidrome erkennt neue Dateien "
+            "ohnehin selbst (ND_MONITORCHANGES).",
+        )
     job_id = await jobs.enqueue(
         jobs.NAVIDROME_SCAN,
         {"full": body.full},

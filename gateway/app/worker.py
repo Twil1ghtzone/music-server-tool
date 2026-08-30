@@ -15,6 +15,7 @@ from typing import Awaitable, Callable
 from .clients import http
 from .config import ensure_dirs, settings
 from .db import configure, db
+from .errors import PermanentError
 from .events import emit, prune as prune_events
 from .logging_conf import get_logger, setup_logging
 from .security import prune_attempts, prune_sessions
@@ -55,6 +56,19 @@ async def run_job(job: dict) -> None:
     except asyncio.CancelledError:
         await jobs.fail(job_id, "Worker wurde beendet")
         raise
+    except PermanentError as exc:
+        # Fehlende Voraussetzung - wiederholen aendert nichts. Ohne diesen Fall
+        # brannte ein Job alle Versuche in derselben Sekunde ab und stand
+        # dreimal identisch im Log.
+        log.warning("Job %s (%s) nicht ausfuehrbar: %s", job_id, job["type"], exc)
+        await jobs.fail(job_id, f"{type(exc).__name__}: {exc}", retry=False)
+        await emit(
+            f"Job nicht ausfuehrbar: {job['type']} - {exc}",
+            category="job",
+            level="warn",
+            data={"job": job_id},
+        )
+        return
     except Exception as exc:
         log.exception("Job %s (%s) fehlgeschlagen", job_id, job["type"])
         await jobs.fail(job_id, f"{type(exc).__name__}: {exc}")
