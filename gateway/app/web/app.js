@@ -31,7 +31,13 @@ async function api(path, options = {}) {
 
   const response = await fetch(path, opts);
   if (response.status === 401) {
-    showLogin();
+    // Ein 401 beim Start ist normal (noch nicht angemeldet). Ein 401, während
+    // eine Sitzung läuft, heißt: das Cookie kommt nicht zurück. Das früher
+    // stumm zu behandeln sah aus wie ein hängendes Login-Fenster.
+    showLogin(state.user
+      ? 'Sitzung wurde nicht angenommen. Das Anmelde-Cookie kommt nicht zurück — '
+        + 'meist ein Cache-Problem (Strg+Shift+R) oder ein Browser, der Cookies blockiert.'
+      : null);
     throw new Error('Nicht angemeldet');
   }
   const text = await response.text();
@@ -78,11 +84,19 @@ const STATE_PILL = {
 };
 
 // ------------------------------------------------------------------ Login
-function showLogin() {
+function showLogin(message = null) {
   state.user = null;
   if (state.stream) { state.stream.close(); state.stream = null; }
   $('#app').hidden = true;
   $('#login').hidden = false;
+  // Nur setzen, nie löschen: eine Ansicht feuert mehrere Anfragen parallel,
+  // und der zweite 401 würde sonst die Meldung des ersten wieder wegräumen.
+  // Geleert wird ausschließlich beim nächsten Anmeldeversuch.
+  if (message) {
+    const box = $('#login-error');
+    box.textContent = message;
+    box.hidden = false;
+  }
 }
 
 async function showApp(user) {
@@ -196,8 +210,10 @@ async function loadOverview() {
   const virtual = status.virtual || {};
 
   $('#tiles').innerHTML = [
-    tile('Navidrome', nd.online ? 'online' : 'offline',
-         nd.serverVersion || nd.error || '', nd.online ? 'ok' : 'err'),
+    tile('Navidrome',
+         nd.online ? (nd.authenticated ? 'online' : 'ohne Zugang') : 'offline',
+         nd.serverVersion || nd.note || nd.error || '',
+         nd.online ? (nd.authenticated ? 'ok' : 'warn') : 'err'),
     tile('Titel indexiert', (lib.files ?? 0).toLocaleString('de-DE'),
          `${bytes(lib.bytes)} · ${duration(lib.seconds)}`),
     tile('Jobs aktiv', (jobs.pending || 0) + (jobs.running || 0),
@@ -547,9 +563,13 @@ async function loadDiagnostics() {
       </div>
     </div>
     <div class="tiles">
-      ${tile('Navidrome', data.navidrome.online ? 'online' : 'offline',
-             data.navidrome.serverVersion || data.navidrome.error || '',
-             data.navidrome.online ? 'ok' : 'err')}
+      ${tile('Navidrome',
+             data.navidrome.online
+               ? (data.navidrome.authenticated ? 'online' : 'ohne Zugang') : 'offline',
+             data.navidrome.serverVersion || data.navidrome.note
+               || data.navidrome.error || '',
+             data.navidrome.online
+               ? (data.navidrome.authenticated ? 'ok' : 'warn') : 'err')}
       ${tile('Deezer-Katalog', data.deezer.reachable ? 'erreichbar' : 'blockiert', '',
              data.deezer.reachable ? 'ok' : 'err')}
       ${tile('Deemix', data.deemix.reachable ? 'erreichbar' : 'offline',

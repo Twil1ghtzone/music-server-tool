@@ -93,6 +93,10 @@ async def remember_credentials(params: dict[str, str]) -> None:
         log.debug("Zugangsdaten nicht gespeichert: %s", exc)
 
 
+class NoCredentials(NavidromeError):
+    """Weder eigenes Passwort noch geliehenes Token vorhanden."""
+
+
 async def _credentials() -> dict[str, str]:
     global _borrowed
     if settings.navidrome_password:
@@ -109,11 +113,28 @@ async def _credentials() -> dict[str, str]:
 
     if _borrowed:
         return {**_borrowed, "v": API_VERSION, "c": CLIENT_NAME, "f": "json"}
-    return auth_params()
+
+    # Frueher wurde hier mit leerem Passwort angefragt. Das erzeugte bei jedem
+    # Dashboard-Aufruf drei abgelehnte Anmeldungen in Navidromes Log - unnoetig
+    # laut und in Reichweite jeder Fail2ban-Regel davor.
+    raise NoCredentials(
+        "Noch keine Navidrome-Zugangsdaten. Sie werden uebernommen, sobald sich "
+        "ein Client ueber den Proxy anmeldet - oder setze NAVIDROME_PASSWORD."
+    )
 
 
 def has_credentials() -> bool:
     return bool(settings.navidrome_password or _borrowed)
+
+
+async def reachable() -> bool:
+    """Erreichbarkeit ohne Zugangsdaten: /ping ausserhalb der Subsonic-API
+    verlangt keine Anmeldung."""
+    try:
+        resp = await http.navidrome().get("/ping", timeout=5.0)
+        return resp.status_code < 500
+    except Exception:
+        return False
 
 
 async def call(endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -147,17 +168,32 @@ async def scan_status() -> dict[str, Any]:
 
 
 async def server_info() -> dict[str, Any]:
+    """Erreichbarkeit und Anmeldung sind zwei verschiedene Fragen.
+
+    Ohne Zugangsdaten wird die Subsonic-API gar nicht erst befragt - der Server
+    gilt trotzdem als online, wenn /ping antwortet. Andernfalls stuende im
+    Dashboard "offline", obwohl Navidrome laeuft und nur das Token fehlt.
+    """
+    if not has_credentials():
+        online = await reachable()
+        return {
+            "online": online,
+            "authenticated": False,
+            "error": None if online else "nicht erreichbar",
+            "note": "Zugangsdaten folgen mit der ersten Client-Anmeldung",
+        }
     try:
         body = await call("ping")
         return {
             "online": True,
+            "authenticated": True,
             "version": body.get("version"),
             "type": body.get("type"),
             "serverVersion": body.get("serverVersion"),
             "openSubsonic": body.get("openSubsonic", False),
         }
     except Exception as exc:
-        return {"online": False, "error": str(exc)}
+        return {"online": await reachable(), "authenticated": False, "error": str(exc)}
 
 
 # ------------------------------------------------------------ Bibliothek

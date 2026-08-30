@@ -368,6 +368,29 @@ Fingerprints, Duplikatgruppen) und `./data/navidrome/navidrome.db`
 (Wiedergabezähler, Playlists, Bewertungen). Beide bei gestoppten Containern
 kopieren oder `sqlite3 … ".backup"` verwenden.
 
+**Aktualisieren.** Im Stack-Verzeichnis:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+`docker restart` reicht **nicht** — das startet den bestehenden Container mit
+seinem alten Image neu. Nur `up -d` erzeugt ihn mit dem frisch geladenen Image
+neu. Danach im Browser einmal hart neu laden (Strg+Shift+R): Dashboard und
+Skript liegen sonst noch im Cache.
+
+Das Stack-Verzeichnis verrät der Container selbst:
+
+```bash
+docker inspect music-gateway-api --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}'
+```
+
+Ob die neue Fassung wirklich ausgeliefert wird:
+
+```bash
+curl -s http://localhost:8080/style.css | head -5
+```
+
 **Startprüfung.** *Diagnose* im Dashboard prüft Pfade, Rechte, Trennung von
 Staging und Bibliothek, ob Import-Moves atomar sind, und ob Navidrome, Deezer,
 Deemix, ffmpeg, ffprobe und fpcalc erreichbar sind. Dieselben Prüfungen

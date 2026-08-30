@@ -230,14 +230,21 @@ async def service_checks() -> list[dict[str, str]]:
                    f"{info.get('type', '?')} {info.get('serverVersion', '')}".strip())
         )
         # Erreichbar heisst noch nicht: Zugangsdaten stimmen.
-        try:
-            await navidrome.call("getScanStatus")
-            out.append(_check("Navidrome-Anmeldung", "ok", settings.navidrome_user))
-        except Exception as exc:
+        if not navidrome.has_credentials():
             out.append(
-                _check("Navidrome-Anmeldung", "fail",
-                       f"NAVIDROME_USER/PASSWORD werden abgelehnt: {exc}")
+                _check("Navidrome-Anmeldung", "warn",
+                       "noch keine Zugangsdaten - kommt mit der ersten "
+                       "Client-Anmeldung ueber Port 8080")
             )
+        else:
+            try:
+                await navidrome.call("getScanStatus")
+                out.append(_check("Navidrome-Anmeldung", "ok", settings.navidrome_user))
+            except Exception as exc:
+                out.append(
+                    _check("Navidrome-Anmeldung", "fail",
+                           f"Zugangsdaten werden abgelehnt: {exc}")
+                )
     else:
         out.append(_check("Navidrome", "fail", str(info.get("error", "nicht erreichbar"))))
 
