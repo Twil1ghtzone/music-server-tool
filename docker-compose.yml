@@ -34,7 +34,9 @@ x-gateway: &gateway
     - /mnt/tank/music-staging:/staging
     - /mnt/tank/music-quarantine:/quarantine
   tmpfs:
-    - /tmp
+    # mode explizit: der Prozess laeuft nach dem Rechtewechsel als UID 1000
+    # und muss in /tmp schreiben koennen.
+    - /tmp:mode=1777
   logging:
     driver: json-file
     options: { max-size: "10m", max-file: "3" }
