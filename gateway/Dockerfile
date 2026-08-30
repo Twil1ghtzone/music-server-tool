@@ -2,11 +2,13 @@ FROM python:3.12-slim AS base
 
 # ffmpeg/ffprobe  -> Audio-Stream-Hash + technische Metadaten
 # libchromaprint-tools -> fpcalc fuer akustische Fingerprints
+# gosu -> Rechte im Entrypoint als root herstellen, dann unprivilegiert starten
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ffmpeg \
       libchromaprint-tools \
       ca-certificates \
+      gosu \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \

@@ -77,7 +77,13 @@ async def verify(params, ip: str = "unknown") -> bool:
     ttl = settings.auth_cache_ttl if valid else 5
     _cache[key] = (now + ttl, valid)
 
-    if not valid:
+    if valid:
+        # Der Gateway braucht selbst Zugriff auf die Navidrome-API, um
+        # importierte Titel auf ihre ID aufzuloesen. Statt dafuer ein zweites
+        # Passwort in der Konfiguration zu verlangen, leiht er sich das Token
+        # des ersten Clients, der sich erfolgreich anmeldet.
+        await navidrome.remember_credentials(dict(params))
+    else:
         _note_failure(ip)
     return valid
 

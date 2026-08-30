@@ -50,85 +50,95 @@ gesamte Bibliothek.
 
 ## Schnellstart
 
-```bash
-cp .env.example .env
-```
-
-In `.env` mindestens setzen: `NAVIDROME_PASSWORD`, `GATEWAY_ADMIN_PASSWORD`
-und `GATEWAY_SESSION_SECRET`. Die Pfade stehen direkt in
-`docker-compose.yml` — wer nicht `/mnt/tank/…` nutzt, passt sie dort an. Der
-Deezer-ARL bleibt wie gewohnt in der Deemix-Oberfläche.
-
-Session-Secret erzeugen:
+Die vier Dienste aus [docker-compose.yml](docker-compose.yml) übernehmen und
+starten:
 
 ```bash
-openssl rand -hex 32
+docker compose up -d
 ```
 
-Rechte setzen und starten:
+Das war es. Keine `.env`, keine Ordner anlegen, keine Rechte setzen:
+
+- Fehlende Verzeichnisse legt Docker beim ersten Start an.
+- Die Rechte darauf zieht der Gateway-Container selbst gerade — er startet als
+  root, richtet `/data`, `/staging` und `/quarantine` für UID 1000 ein und
+  läuft danach unprivilegiert weiter. Die Bibliothek unter `/music` fasst er
+  dabei bewusst nicht an.
+- Das Session-Geheimnis erzeugt er einmalig und legt es unter `/data` ab, damit
+  Neustarts niemanden abmelden.
+- Zugriff auf die Navidrome-API besorgt er sich selbst (siehe unten).
+
+Das Passwort fürs Dashboard steht nach dem ersten Start im Log — es erscheint
+genau einmal:
 
 ```bash
-chmod 600 .env && docker compose up -d --build
+docker compose logs gateway-api | grep -A2 Start-Passwort
 ```
-
-Dann:
 
 | Adresse | Zweck |
 |---|---|
 | `http://<host>:8080` | Dashboard |
 | `http://<host>:8080/rest/…` | **Subsonic-Endpunkt für die Clients** |
-| `http://<host>:4533` | Navidrome direkt (Erstkonfiguration, Nutzeranlage) |
+| `http://<host>:4533` | Navidrome direkt (Nutzerverwaltung) |
 
 > **Wichtig:** Der Client wird auf **Port 8080** eingerichtet, nicht auf 4533.
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+### Wie der Gateway ohne Navidrome-Passwort auskommt
+
+Der Gateway braucht selbst Zugriff auf die Navidrome-API, um importierte Titel
+auf ihre echte ID aufzulösen und Scans anzustoßen. Statt dafür ein zweites
+Passwort in der Konfiguration zu verlangen, **übernimmt er das Subsonic-Token
+des ersten Clients, der sich erfolgreich über Port 8080 anmeldet.**
+
+Das funktioniert, weil Subsonic-Token `md5(passwort + salt)` mit frei gewähltem
+Salt sind — ohne Ablauf und ohne Einmalgebrauch. Dasselbe Tripel ist beliebig
+oft wiederverwendbar.
+
+Der Preis, offen benannt: das Tripel liegt in der Gateway-Datenbank und ist für
+API-Zugriffe so mächtig wie das Passwort selbst. Es ist derselbe Wert, den der
+Client ohnehin bei jeder Anfrage überträgt, und die Datenbank liegt neben
+`navidrome.db`. Wer das nicht möchte, setzt `NAVIDROME_PASSWORD` — dann wird
+nichts geliehen und nichts gespeichert.
+
+Bis sich der erste Client angemeldet hat, zeigt die Startprüfung hier einen
+Hinweis. Downloads funktionieren trotzdem: `ND_MONITORCHANGES` indexiert neue
+Dateien auch ohne Scan-Anstoß.
+
+### Erster Durchlauf
+
+1. `docker compose up -d`
+2. Dashboard öffnen, Passwort aus dem Log, unter **Konto** ändern.
+3. **Diagnose** aufrufen. Die Startprüfung darf keine roten Einträge zeigen.
+4. Einen Client auf Port 8080 einrichten (Navidrome-Zugangsdaten) und einmal
+   irgendetwas suchen — damit hat der Gateway seinen API-Zugang.
+5. **Bibliothek → Neu indexieren.** Reiner Lesevorgang.
+6. Im Client einen Titel suchen, den es lokal nicht gibt.
+
 ---
 
 ## Umstieg von einem laufenden Setup
 
-Wer Navidrome und Deemix schon betreibt, ändert genau eine Sache: **Deemix lädt
-nicht mehr direkt in die Bibliothek, sondern in einen Staging-Ordner.**
+Wer Navidrome und Deemix schon betreibt, ändert an den bestehenden Diensten
+**genau eine Zeile**: Deemix lädt nicht mehr direkt in die Bibliothek, sondern
+in einen Staging-Ordner.
 
-In Deemix selbst muss nichts angepasst werden. Der *Download Path* bleibt
+```yaml
+    volumes:
+      - ./config/deemix:/config
+      - /mnt/tank/music-staging:/downloads    # war: /mnt/tank/music
+```
+
+In Deemix selbst ist nichts anzupassen. Der *Download Path* bleibt
 `/downloads`, Trackname- und Album-Templates bleiben, wie sie sind — nur das
-Volume dahinter zeigt jetzt auf `STAGING_DIR` statt auf die Bibliothek. Der
-Gateway übernimmt die Ordner- und Dateistruktur, die Deemix daraus erzeugt,
-unverändert (`GATEWAY_IMPORT_LAYOUT=preserve`). Neue Titel liegen damit exakt
-so wie der bestehende Bestand, der ja von denselben Templates stammt.
+Volume dahinter zeigt woanders hin. Der Gateway übernimmt die Ordner- und
+Dateistruktur, die Deemix daraus erzeugt, unverändert
+(`GATEWAY_IMPORT_LAYOUT=preserve`). Neue Titel liegen damit exakt so wie der
+bestehende Bestand, der ja von denselben Templates stammt.
 
-### Schritte
-
-1. Zwei Datasets anlegen, **außerhalb** der Bibliothek, und dem Apps-User
-   geben. Liegen sie innerhalb von `/mnt/tank/music`, würde Navidrome
-   halbfertige Downloads indexieren — die Startprüfung bricht dann mit einem
-   Fehler ab.
-
-   ```bash
-   zfs create tank/music-staging
-   ```
-
-   ```bash
-   zfs create tank/music-quarantine
-   ```
-
-   ```bash
-   chown -R 1000:1000 /mnt/tank/music-staging /mnt/tank/music-quarantine
-   ```
-
-2. Datenverzeichnis des Gateways anlegen. Ohne diesen Schritt legt Docker es
-   als root an und der Gateway (UID 1000) kann seine Datenbank nicht
-   schreiben:
-
-   ```bash
-   mkdir -p data/gateway && chown -R 1000:1000 data/gateway
-   ```
-
-3. `.env` anlegen und füllen, dann `docker compose up -d --build`
-4. Dashboard öffnen → **Diagnose**. Die Startprüfung muss ohne rote Einträge
-   durchlaufen, bevor der erste Titel angefordert wird.
-5. **Bibliothek → Neu indexieren.** Reiner Lesevorgang, verändert keine Datei.
-6. Erst danach im Client einen Titel suchen, den es lokal nicht gibt.
+Dazu kommen die beiden `gateway-*`-Dienste aus der Compose. Navidrome bleibt
+unangetastet.
 
 ### Was am bestehenden Bestand verändert wird
 
@@ -146,10 +156,10 @@ Erst die Duplikatvorschläge im Dashboard prüfen, dann freischalten.
 
 ### Navidrome bleibt, wie es war
 
-`docker-compose.yml` startet Navidrome weiterhin als `user: "0:0"`. Das ist
-Absicht: `./data/navidrome` wurde als root angelegt, und ein Wechsel auf
-`1000:1000` würde die bestehende `navidrome.db` unbeschreibbar machen. Wer
-umstellen will, macht vorher
+Die Compose startet Navidrome weiterhin als `user: "0:0"`. Das ist Absicht:
+`./data/navidrome` wurde als root angelegt, und ein Wechsel auf `1000:1000`
+würde die bestehende `navidrome.db` unbeschreibbar machen. Wer umstellen will,
+macht vorher
 
 ```bash
 docker compose stop navidrome && chown -R 1000:1000 ./data/navidrome
@@ -164,18 +174,15 @@ neben den Track. Der Import nimmt sie mit — ebenso `cover.jpg` und
 `folder.jpg`. Ein vorhandenes Cover in der Bibliothek wird dabei nie
 überschrieben.
 
----
+### Wenn `/music` nicht beschreibbar ist
 
-### Reihenfolge bei der Ersteinrichtung
+Der Gateway läuft als UID 1000, genau wie Deemix. Schreibt Deemix heute schon
+in die Bibliothek, passt es. Andernfalls meldet der Container es beim Start
+und die Startprüfung zeigt es rot an:
 
-1. `docker compose up -d navidrome` — Navidrome starten, im Browser den
-   Admin-Account anlegen. Genau dieses Passwort kommt in `NAVIDROME_PASSWORD`.
-2. `docker compose up -d` — restliche Container starten.
-3. Dashboard öffnen, unter **Diagnose** prüfen, ob Navidrome, Deezer, Deemix und
-   ffmpeg/fpcalc grün sind.
-4. Unter **Bibliothek → Neu indexieren** den ersten Index aufbauen.
-5. Einen Client auf Port 8080 einrichten und nach einem Titel suchen, den es
-   lokal nicht gibt.
+```bash
+chown -R 1000:1000 /mnt/tank/music
+```
 
 ---
 

@@ -7,6 +7,7 @@ aufloesen. Der Client-Verkehr laeuft nicht hierueber, sondern durch den Proxy.
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from typing import Any
 
@@ -50,8 +51,73 @@ def _unwrap(payload: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+# ------------------------------------------------- Geliehene Zugangsdaten
+# Damit der Stack ohne eine einzige Pflichtangabe startet, kann der Gateway
+# ohne eigenes Navidrome-Passwort auskommen: sobald ein Client sich erfolgreich
+# durch den Proxy anmeldet, merkt er sich dessen Subsonic-Token und nutzt es
+# fuer seine eigenen Aufrufe (Titel nach dem Import auf die Navidrome-ID
+# aufloesen, Scan anstossen).
+#
+# Warum das geht: Subsonic-Token sind t = md5(passwort + salt) mit frei
+# gewaehltem Salt und ohne Ablauf oder Einmalgebrauch. Dasselbe Tripel ist
+# beliebig oft wiederverwendbar.
+#
+# Der Preis, ehrlich benannt: das Tripel liegt in der setting-Tabelle und ist
+# fuer API-Zugriffe so maechtig wie das Passwort selbst. Es ist derselbe Wert,
+# den der Client ohnehin bei jeder Anfrage ueber die Leitung schickt, und die
+# Datenbank liegt neben navidrome.db. Wer das nicht will, setzt
+# NAVIDROME_PASSWORD - dann wird nichts geliehen und nichts gespeichert.
+#
+# Einschraenkung: startScan verlangt einen Admin. Ist der angemeldete Client
+# kein Admin, schlaegt nur der Scan-Anstoss fehl - ND_MONITORCHANGES faengt
+# das auf, und die Titelsuche zum Aufloesen funktioniert fuer jeden Benutzer.
+_BORROW_KEY = "navidrome.borrowed_auth"
+_borrowed: dict[str, str] | None = None
+
+
+async def remember_credentials(params: dict[str, str]) -> None:
+    """Nach erfolgreicher Client-Anmeldung aufrufen."""
+    global _borrowed
+    if settings.navidrome_password:
+        return
+    keep = {k: v for k, v in params.items() if k in ("u", "t", "s", "p") and v}
+    if not keep.get("u") or _borrowed == keep:
+        return
+    _borrowed = keep
+    try:
+        from ..db import db
+
+        await db.set_setting(_BORROW_KEY, json.dumps(keep))
+        log.info("Zugangsdaten von Benutzer '%s' uebernommen", keep["u"])
+    except Exception as exc:  # pragma: no cover
+        log.debug("Zugangsdaten nicht gespeichert: %s", exc)
+
+
+async def _credentials() -> dict[str, str]:
+    global _borrowed
+    if settings.navidrome_password:
+        return auth_params()
+
+    if _borrowed is None:
+        try:
+            from ..db import db
+
+            stored = await db.get_setting(_BORROW_KEY)
+            _borrowed = json.loads(stored) if stored else {}
+        except Exception:
+            _borrowed = {}
+
+    if _borrowed:
+        return {**_borrowed, "v": API_VERSION, "c": CLIENT_NAME, "f": "json"}
+    return auth_params()
+
+
+def has_credentials() -> bool:
+    return bool(settings.navidrome_password or _borrowed)
+
+
 async def call(endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    query = auth_params()
+    query = await _credentials()
     if params:
         query.update({k: v for k, v in params.items() if v is not None})
     resp = await http.navidrome().get(f"/rest/{endpoint}", params=query)

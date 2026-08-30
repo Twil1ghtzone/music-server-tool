@@ -65,19 +65,29 @@ async def ensure_admin_user() -> None:
         return
     username = settings.admin_user or "admin"
     password = settings.admin_password
+    generated = False
     if not password:
         password = secrets.token_urlsafe(18)
-        log.warning(
-            "GATEWAY_ADMIN_PASSWORD war leer. Generiertes Start-Passwort fuer "
-            "'%s': %s  -- bitte sofort im Dashboard aendern.",
-            username,
-            password,
-        )
+        generated = True
     await db.execute(
         "INSERT INTO app_user(username, password_hash) VALUES (?, ?)",
         (username, hash_password(password)),
     )
-    log.info("Admin-Benutzer '%s' angelegt.", username)
+
+    if not generated:
+        log.info("Dashboard-Benutzer '%s' angelegt.", username)
+        return
+
+    # Ohne gesetztes Passwort ist das Log der einzige Ort, an dem der Zugang
+    # steht. Entsprechend schwer zu uebersehen ausgeben - und nur dieses eine
+    # Mal, denn danach liegt in der Datenbank nur noch der Argon2-Hash.
+    line = "=" * 68
+    log.warning("\n%s", line)
+    log.warning("  Dashboard-Zugang wurde angelegt")
+    log.warning("     Benutzer:       %s", username)
+    log.warning("     Start-Passwort: %s", password)
+    log.warning("  Im Dashboard unter 'Konto' aendern. Diese Meldung erscheint nur einmal.")
+    log.warning("%s\n", line)
 
 
 # -------------------------------------------------------------- Rate-Limiting

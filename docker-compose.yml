@@ -6,41 +6,85 @@
 #   gateway-api      Subsonic-Proxy + Web-Dashboard   <- Clients verbinden hier
 #   gateway-worker   Downloads, Import, Scan, Dedup
 #
+# Einsetzen und starten - mehr ist nicht noetig:
+#
+#     docker compose up -d
+#
+# Keine .env, keine Ordner anlegen, keine Rechte setzen. Fehlende
+# Verzeichnisse legt Docker an, die Rechte zieht der Gateway-Container beim
+# Start selbst gerade. Das Zugangspasswort fuers Dashboard steht danach im Log:
+#
+#     docker compose logs gateway-api | grep Start-Passwort
+#
 # Die Clients werden auf Port 8080 eingerichtet, NICHT auf 4533.
 # Benutzername und Passwort bleiben die aus Navidrome.
-#
-# Voraussetzungen auf dem NAS:
-#   zfs create tank/music-staging
-#   zfs create tank/music-quarantine
-#   chown -R 1000:1000 /mnt/tank/music-staging /mnt/tank/music-quarantine
-#   mkdir -p data/gateway && chown -R 1000:1000 data/gateway
 # ---------------------------------------------------------------------------
 name: music-server-tool
 
+x-gateway: &gateway
+  image: ghcr.io/twil1ghtzone/music-server-tool:latest
+  # Alternative ohne Registry (Repo muss dann neben der Compose liegen):
+  # build:
+  #   context: ./gateway
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+  volumes:
+    - ./data/gateway:/data
+    - /mnt/tank/music:/music                  # rw: hier landen neue Titel
+    - /mnt/tank/music-staging:/staging
+    - /mnt/tank/music-quarantine:/quarantine
+  tmpfs:
+    - /tmp
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
 x-gateway-env: &gateway-env
+  # Startet als root, richtet die Verzeichnisrechte ein und laeuft dann
+  # unprivilegiert unter dieser Kennung weiter - dieselbe wie bei Deemix.
+  PUID: 1000
+  PGID: 1000
   TZ: ${TZ:-Europe/Berlin}
   LOG_LEVEL: ${LOG_LEVEL:-info}
+
+  # Servicenamen im Compose-Netz - Docker loest sie selbst auf.
   NAVIDROME_URL: http://navidrome:4533
-  NAVIDROME_USER: ${NAVIDROME_USER:-admin}
-  NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD}
   DEEMIX_URL: http://deemix:6595
+
+  # Optional. Bleibt es leer, uebernimmt der Gateway das Subsonic-Token des
+  # ersten Clients, der sich erfolgreich anmeldet, und nutzt es fuer Scan und
+  # ID-Aufloesung. Wer das nicht moechte, traegt hier Navidrome-Zugangsdaten ein.
+  NAVIDROME_USER: ${NAVIDROME_USER:-admin}
+  NAVIDROME_PASSWORD: ${NAVIDROME_PASSWORD:-}
+
+  # 1 = MP3 128 | 3 = MP3 320 | 9 = FLAC
   DEEMIX_BITRATE: ${DEEMIX_BITRATE:-3}
+
   # Pfade INNERHALB der Container - die Zuordnung macht der volumes-Block.
   MUSIC_DIR: /music
   STAGING_DIR: /staging
   QUARANTINE_DIR: /quarantine
   DB_PATH: /data/gateway.db
   CACHE_DIR: /data/cache
+
+  # Leer lassen: beim ersten Start wird ein Passwort erzeugt und ins Log
+  # geschrieben. Das Session-Geheimnis legt der Container dauerhaft unter
+  # /data ab, damit Neustarts niemanden abmelden.
   GATEWAY_ADMIN_USER: ${GATEWAY_ADMIN_USER:-admin}
-  GATEWAY_ADMIN_PASSWORD: ${GATEWAY_ADMIN_PASSWORD}
-  GATEWAY_SESSION_SECRET: ${GATEWAY_SESSION_SECRET}
+  GATEWAY_ADMIN_PASSWORD: ${GATEWAY_ADMIN_PASSWORD:-}
+  GATEWAY_SESSION_SECRET: ${GATEWAY_SESSION_SECRET:-}
   GATEWAY_SECURE_COOKIES: ${GATEWAY_SECURE_COOKIES:-false}
+
+  #   defer  = kurzer Hinweiston, Download laeuft im Hintergrund (robust)
+  #   stream = Verbindung offen halten und live mitstreamen (kein Seeking)
   GATEWAY_STREAM_MODE: ${GATEWAY_STREAM_MODE:-defer}
   GATEWAY_MARKER_SUFFIX: ${GATEWAY_MARKER_SUFFIX:-[Nicht heruntergeladen]}
   GATEWAY_WORKER_CONCURRENCY: ${GATEWAY_WORKER_CONCURRENCY:-2}
+
   # preserve = die von Deemix erzeugte Struktur unveraendert uebernehmen
   GATEWAY_IMPORT_LAYOUT: ${GATEWAY_IMPORT_LAYOUT:-preserve}
-  # Beide aus: der Gateway fasst keine vorhandene Datei an.
+
+  # Beide aus: der Gateway fasst keine vorhandene Datei an, er legt nur neue an.
   GATEWAY_ALLOW_DEDUPE_APPLY: ${GATEWAY_ALLOW_DEDUPE_APPLY:-false}
   GATEWAY_ALLOW_TAG_WRITE: ${GATEWAY_ALLOW_TAG_WRITE:-false}
 
@@ -50,10 +94,7 @@ services:
   navidrome:
     image: deluan/navidrome:latest
     container_name: navidrome
-    # 0:0 wie bisher. NICHT auf 1000:1000 aendern, ohne vorher
-    #   docker compose stop navidrome && chown -R 1000:1000 ./data/navidrome
-    # auszufuehren - sonst ist die bestehende navidrome.db unbeschreibbar.
-    user: 0:0
+    user: 0:0 # <--- TrueNAS SCALE Apps User & Group
     ports:
       - 4533:4533
     restart: unless-stopped
@@ -81,10 +122,10 @@ services:
       - DEEMIX_SERVER_HOST=0.0.0.0
     volumes:
       - ./config/deemix:/config
-      # GEAENDERT: Deemix laedt in die Staging-Ablage statt direkt in die
-      # Bibliothek. In Deemix selbst bleibt alles wie es ist - Download Path
-      # weiterhin /downloads, Templates unveraendert. Nur das Ziel dahinter
-      # wechselt. Der Gateway uebernimmt die erzeugte Struktur eins zu eins
+      # EINZIGE AENDERUNG an deinen bisherigen Diensten: Deemix laedt in die
+      # Staging-Ablage statt direkt in die Bibliothek. In Deemix selbst bleibt
+      # alles wie es ist - Download Path weiterhin /downloads, Templates
+      # unveraendert. Der Gateway uebernimmt die erzeugte Struktur eins zu eins
       # und schiebt erst fertige Dateien nach /mnt/tank/music.
       - /mnt/tank/music-staging:/downloads
     ports:
@@ -92,28 +133,16 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------
-  # Gateway API: Subsonic-Proxy + Web-Dashboard  <- hier verbinden die Clients
+  # Gateway API: Subsonic-Proxy + Dashboard  <- hier verbinden sich die Clients
   gateway-api:
-    build:
-      context: ./gateway
-    image: music-gateway:local
+    <<: *gateway
     container_name: music-gateway-api
     command: ["api"]
-    user: "1000:1000"
-    restart: unless-stopped
-    security_opt: ["no-new-privileges:true"]
     environment:
       <<: *gateway-env
       GATEWAY_ROLE: api
     ports:
       - 8080:8080
-    volumes:
-      - ./data/gateway:/data
-      - /mnt/tank/music:/music                 # rw: Import legt hier ab
-      - /mnt/tank/music-staging:/staging
-      - /mnt/tank/music-quarantine:/quarantine
-    tmpfs:
-      - /tmp
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=3).status==200 else 1)"]
       interval: 30s
@@ -123,35 +152,17 @@ services:
     depends_on:
       - navidrome
       - deemix
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
 
   # -------------------------------------------------------------------------
   # Gateway Worker: Downloads, Import, Scan, Duplikate
   # Eigener Prozess, damit ein Full-Scan nie die Wiedergabe blockiert.
   gateway-worker:
-    build:
-      context: ./gateway
-    image: music-gateway:local
+    <<: *gateway
     container_name: music-gateway-worker
     command: ["worker"]
-    user: "1000:1000"
-    restart: unless-stopped
-    security_opt: ["no-new-privileges:true"]
     environment:
       <<: *gateway-env
       GATEWAY_ROLE: worker
-    volumes:
-      - ./data/gateway:/data
-      - /mnt/tank/music:/music
-      - /mnt/tank/music-staging:/staging
-      - /mnt/tank/music-quarantine:/quarantine
-    tmpfs:
-      - /tmp
     depends_on:
       gateway-api:
         condition: service_healthy
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }

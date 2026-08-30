@@ -162,20 +162,34 @@ def config_checks() -> list[dict[str, str]]:
                    "koennen damit anders liegen als der bestehende Bestand")
         )
 
-    if not os.environ.get("GATEWAY_SESSION_SECRET", "").strip():
+    if os.environ.get("GATEWAY_SESSION_SECRET", "").strip():
+        out.append(_check("Session-Secret", "ok", "aus der Umgebung"))
+    elif (settings.db_path.parent / "session.secret").exists():
         out.append(
-            _check("Session-Secret", "warn",
-                   "nicht gesetzt - es wurde eines erzeugt, aber jeder Neustart "
-                   "meldet alle Sitzungen ab")
+            _check("Session-Secret", "ok",
+                   "automatisch erzeugt und unter /data abgelegt - Neustarts "
+                   "melden niemanden ab")
         )
     else:
-        out.append(_check("Session-Secret", "ok", "gesetzt"))
-
-    if not settings.navidrome_password:
         out.append(
-            _check("Navidrome-Zugang", "fail",
-                   "NAVIDROME_PASSWORD ist leer - Scan-Trigger und ID-Aufloesung "
-                   "funktionieren nicht, Downloads bleiben auf 'importing' haengen")
+            _check("Session-Secret", "warn",
+                   "fluechtig - das Datenverzeichnis ist nicht beschreibbar, "
+                   "jeder Neustart meldet alle Sitzungen ab")
+        )
+
+    if settings.navidrome_password:
+        out.append(_check("Navidrome-Zugang", "ok", f"eigener Account '{settings.navidrome_user}'"))
+    elif navidrome.has_credentials():
+        out.append(
+            _check("Navidrome-Zugang", "ok",
+                   "Zugangsdaten von einem angemeldeten Client uebernommen")
+        )
+    else:
+        out.append(
+            _check("Navidrome-Zugang", "warn",
+                   "noch keine. Sobald sich ein Client ueber Port 8080 anmeldet, "
+                   "uebernimmt der Gateway dessen Token fuer Scan und "
+                   "ID-Aufloesung. Alternativ NAVIDROME_PASSWORD setzen.")
         )
 
     out.append(

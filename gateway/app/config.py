@@ -27,6 +27,34 @@ def _env_bool(key: str, default: bool = False) -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def _session_secret() -> str:
+    """Aus der Umgebung, sonst dauerhaft neben der Datenbank ablegen.
+
+    Ohne Persistenz bekaeme jeder Neustart ein frisches Geheimnis und wuerde
+    alle angemeldeten Browser abmelden. Die Datei liegt im Datenverzeichnis,
+    damit API und Worker denselben Wert sehen - und damit der Stack ohne eine
+    einzige Pflichtangabe in der .env startet.
+    """
+    explicit = _env("GATEWAY_SESSION_SECRET")
+    if explicit:
+        return explicit
+
+    path = Path(_env("DB_PATH", "/data/gateway.db")).parent / "session.secret"
+    try:
+        if path.exists():
+            stored = path.read_text(encoding="utf-8").strip()
+            if stored:
+                return stored
+        path.parent.mkdir(parents=True, exist_ok=True)
+        generated = secrets.token_hex(32)
+        path.write_text(generated, encoding="utf-8")
+        os.chmod(path, 0o600)
+        return generated
+    except OSError:
+        # Kein beschreibbares Datenverzeichnis: lieber fluechtig als gar nicht.
+        return secrets.token_hex(32)
+
+
 @dataclass(frozen=True)
 class Settings:
     role: str = field(default_factory=lambda: _env("GATEWAY_ROLE", "api"))
@@ -52,9 +80,7 @@ class Settings:
     # --- Auth / Web -------------------------------------------------------
     admin_user: str = field(default_factory=lambda: _env("GATEWAY_ADMIN_USER", "admin"))
     admin_password: str = field(default_factory=lambda: _env("GATEWAY_ADMIN_PASSWORD"))
-    session_secret: str = field(
-        default_factory=lambda: _env("GATEWAY_SESSION_SECRET") or secrets.token_hex(32)
-    )
+    session_secret: str = field(default_factory=_session_secret)
     secure_cookies: bool = field(default_factory=lambda: _env_bool("GATEWAY_SECURE_COOKIES", False))
     session_ttl_hours: int = field(default_factory=lambda: _env_int("GATEWAY_SESSION_TTL_HOURS", 24 * 14))
 

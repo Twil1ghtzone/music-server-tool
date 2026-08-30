@@ -199,6 +199,18 @@ check("Fingerprint: fremder Titel unter der Schwelle",
       dedupe.similarity(a, other) < dedupe.ACOUSTIC_MATCH_THRESHOLD,
       str(dedupe.similarity(a, other)))
 
+# Ohne gesetztes Geheimnis muss eines erzeugt UND behalten werden, sonst
+# meldet jeder Neustart alle Browser ab.
+from app import config  # noqa: E402
+
+os.environ.pop("GATEWAY_SESSION_SECRET", None)
+first = config._session_secret()
+second = config._session_secret()
+check("Session-Secret wird erzeugt", len(first) == 64, f"{len(first)} Zeichen")
+check("Session-Secret ueberlebt den Neustart", first == second)
+check("Session-Secret liegt im Datenverzeichnis",
+      (BASE / "data" / "session.secret").exists())
+
 print()
 if failures:
     print(f"{len(failures)} Test(s) fehlgeschlagen: {failures}")
