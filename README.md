@@ -310,13 +310,25 @@ importieren*. Der Worker prüft das ohnehin alle fünf Minuten.
 python -m venv .venv && .venv/bin/pip install -r gateway/requirements.txt
 ```
 
-API lokal starten:
+Dashboard lokal starten — legt ein Wegwerf-Datenverzeichnis an und braucht
+weder Navidrome noch Deemix (beide erscheinen dann als offline):
+
+```bash
+cd gateway && python tests/devserver.py
+```
+
+Rauchtest, prüft API, CSRF, Subsonic-Serialisierung und Duplikat-Logik ohne
+laufende Nachbarn:
+
+```bash
+cd gateway && python tests/smoke.py
+```
+
+Einzelne Prozesse von Hand:
 
 ```bash
 cd gateway && uvicorn app.main:app --reload --port 8080
 ```
-
-Worker lokal starten:
 
 ```bash
 cd gateway && python -m app.worker
