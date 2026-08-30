@@ -138,6 +138,17 @@ song = payload.virtual_song(
     " [Nicht heruntergeladen]",
 )
 check("Marker im Titel", song["title"].endswith("[Nicht heruntergeladen]"))
+# docker compose verschluckt fuehrende Leerzeichen in .env-Werten. Der
+# Abstand muss deshalb aus dem Code kommen, nicht aus der Konfiguration.
+check("Marker ohne fuehrendes Leerzeichen bekommt trotzdem Abstand",
+      payload.virtual_song({**song, "title": "Choere", "state": "virtual"},
+                           "[Nicht heruntergeladen]")["title"]
+      == "Choere [Nicht heruntergeladen]",
+      payload.virtual_song({**song, "title": "Choere", "state": "virtual"},
+                           "[Nicht heruntergeladen]")["title"])
+check("Leerer Marker haengt nichts an",
+      payload.virtual_song({**song, "title": "Choere", "state": "virtual"}, "")["title"]
+      == "Choere")
 check("Marker zeigt Zustand",
       payload.virtual_song({**song, "title": "X", "state": "downloading"}, " [x]")["title"]
       .endswith("[Wird geladen]"))

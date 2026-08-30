@@ -163,7 +163,9 @@ def virtual_song(row: dict[str, Any], marker: str) -> dict[str, Any]:
     """
     state = row.get("state") or "virtual"
     hint = _STATE_HINT.get(state)
-    suffix = f" [{hint}]" if hint else marker
+    # Fuehrende Leerzeichen aus .env-Werten verschluckt der Compose-Parser -
+    # der Abstand wird deshalb hier erzwungen statt vom Nutzer erwartet.
+    suffix = f" [{hint}]" if hint else (f" {marker.strip()}" if marker.strip() else "")
     duration = int(row.get("duration") or 0)
     vid = row["id"]
     return {

@@ -54,8 +54,10 @@ gesamte Bibliothek.
 cp .env.example .env
 ```
 
-In `.env` mindestens setzen: `MUSIC_DIR`, `STAGING_DIR`, `QUARANTINE_DIR`,
-`NAVIDROME_PASSWORD`, `GATEWAY_ADMIN_PASSWORD`, `DEEZER_ARL`.
+In `.env` mindestens setzen: `NAVIDROME_PASSWORD`, `GATEWAY_ADMIN_PASSWORD`
+und `GATEWAY_SESSION_SECRET`. Die Pfade stehen direkt in
+`docker-compose.yml` — wer nicht `/mnt/tank/…` nutzt, passt sie dort an. Der
+Deezer-ARL bleibt wie gewohnt in der Deemix-Oberfläche.
 
 Session-Secret erzeugen:
 
@@ -97,12 +99,32 @@ so wie der bestehende Bestand, der ja von denselben Templates stammt.
 
 ### Schritte
 
-1. Zwei Datasets anlegen, **außerhalb** der Bibliothek:
-   `/mnt/tank/music-staging` und `/mnt/tank/music-quarantine`.
-   Liegen sie innerhalb von `/mnt/tank/music`, würde Navidrome halbfertige
-   Downloads indexieren — die Startprüfung bricht deshalb mit einem Fehler ab.
-2. `.env` anlegen und füllen.
-3. `docker compose up -d --build`
+1. Zwei Datasets anlegen, **außerhalb** der Bibliothek, und dem Apps-User
+   geben. Liegen sie innerhalb von `/mnt/tank/music`, würde Navidrome
+   halbfertige Downloads indexieren — die Startprüfung bricht dann mit einem
+   Fehler ab.
+
+   ```bash
+   zfs create tank/music-staging
+   ```
+
+   ```bash
+   zfs create tank/music-quarantine
+   ```
+
+   ```bash
+   chown -R 1000:1000 /mnt/tank/music-staging /mnt/tank/music-quarantine
+   ```
+
+2. Datenverzeichnis des Gateways anlegen. Ohne diesen Schritt legt Docker es
+   als root an und der Gateway (UID 1000) kann seine Datenbank nicht
+   schreiben:
+
+   ```bash
+   mkdir -p data/gateway && chown -R 1000:1000 data/gateway
+   ```
+
+3. `.env` anlegen und füllen, dann `docker compose up -d --build`
 4. Dashboard öffnen → **Diagnose**. Die Startprüfung muss ohne rote Einträge
    durchlaufen, bevor der erste Titel angefordert wird.
 5. **Bibliothek → Neu indexieren.** Reiner Lesevorgang, verändert keine Datei.
