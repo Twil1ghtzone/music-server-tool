@@ -489,6 +489,13 @@ laufende Nachbarn:
 cd gateway && python tests/smoke.py
 ```
 
+Suchpfade gegen eine Navidrome-Attrappe im selben Prozess — prüft, was ein
+Musik-Client tatsächlich zu sehen bekommt (braucht Internet für den Katalog):
+
+```bash
+cd gateway && python tests/proxy_test.py
+```
+
 Einzelne Prozesse von Hand:
 
 ```bash

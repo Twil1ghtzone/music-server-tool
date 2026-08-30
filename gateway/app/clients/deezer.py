@@ -114,6 +114,30 @@ async def get_track(track_id: str) -> dict[str, Any] | None:
     return await _cached(f"track:{track_id}", _fetch, ttl=3600)
 
 
+def dominant_artist(tracks: list[dict[str, Any]], sample: int = 6) -> str | None:
+    """Haeufigster Interpret unter den vordersten Treffern.
+
+    Dient als Rechtschreibkorrektur: Deezer findet bei "marc forster" trotzdem
+    Mark Forster, Navidromes Suche dagegen ist buchstabengetreu und liefert
+    nichts. Der Katalogtreffer verraet also die richtige Schreibweise, mit der
+    sich die lokale Suche wiederholen laesst.
+    """
+    counts: dict[str, int] = {}
+    for track in tracks[:sample]:
+        name = (track.get("artist") or "").strip()
+        if name:
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda item: item[1])[0]
+
+
+def looks_like(a: str, b: str) -> bool:
+    """Grob gleich, wenn man Gross-/Kleinschreibung und Zeichen ignoriert."""
+    norm = lambda s: "".join(ch for ch in (s or "").lower() if ch.isalnum())
+    return norm(a) == norm(b)
+
+
 async def healthy() -> bool:
     try:
         resp = await http.deezer().get("/track/3135556", timeout=5.0)

@@ -175,15 +175,29 @@ async def search(
     local_rows = local if isinstance(local, list) else []
     catalog_rows = catalog if isinstance(catalog, list) else []
 
+    # Navidromes Suche ist buchstabengetreu: "marc forster" findet lokal
+    # nichts, obwohl die Titel da sind. Der Katalog kennt die richtige
+    # Schreibweise - damit wird die lokale Suche einmal wiederholt.
+    corrected: str | None = None
+    if not local_rows and catalog_rows:
+        artist = deezer.dominant_artist(catalog_rows)
+        if artist and not deezer.looks_like(artist, q):
+            try:
+                local_rows = await navidrome.search_songs(artist, count=25)
+                if local_rows:
+                    corrected = artist
+            except Exception as exc:
+                log.debug("Korrigierte Suche fehlgeschlagen: %s", exc)
+
     known = await db.fetch_all(
-        "SELECT provider_id, state, navidrome_id FROM virtual_track WHERE provider = ?",
+        "SELECT provider_id, state, navidrome_id, error FROM virtual_track WHERE provider = ?",
         (deezer.PROVIDER,),
     ) if catalog_rows else []
     by_id = {row["provider_id"]: row for row in known}
     for item in catalog_rows:
         item["known"] = by_id.get(item["provider_id"])
 
-    return {"local": local_rows, "catalog": catalog_rows}
+    return {"local": local_rows, "catalog": catalog_rows, "corrected": corrected}
 
 
 @router.post("/download")

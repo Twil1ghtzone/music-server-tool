@@ -217,10 +217,35 @@ async def _handle_search(request, endpoint, name, items, flat) -> Response:
         log.warning("Katalogsuche fehlgeschlagen: %s", exc)
         candidates = []
 
+    # Navidromes Suche ist buchstabengetreu. Tippt jemand "marc forster",
+    # liefert sie nichts - obwohl die Titel in der Bibliothek liegen. Der
+    # Katalog kennt die richtige Schreibweise; damit wird einmal nachgefragt.
+    if not local_songs and candidates:
+        local_songs = await _retry_with_correction(endpoint, items, query, candidates, result_key)
+        if local_songs:
+            result["song"] = local_songs
+
     additions = await _virtual_additions(candidates, local_songs)
     if additions:
         result["song"] = local_songs + additions
     return payload.render(document, fmt, flat.get("callback"))
+
+
+async def _retry_with_correction(endpoint, items, query, candidates, result_key) -> list[dict]:
+    artist = deezer.dominant_artist(candidates)
+    if not artist or deezer.looks_like(artist, query):
+        return []
+    try:
+        document = await upstream_json(endpoint, _forward_query(items, query=artist))
+    except Exception as exc:
+        log.debug("Korrigierte Suche fehlgeschlagen: %s", exc)
+        return []
+    songs = ((document.get("subsonic-response") or {}).get(result_key) or {}).get("song") or []
+    if not isinstance(songs, list):
+        songs = [songs]
+    if songs:
+        log.debug("Suche '%s' ueber Katalogschreibweise '%s' aufgeloest", query, artist)
+    return songs
 
 
 async def _virtual_additions(candidates: list[dict], local_songs: list[dict]) -> list[dict]:

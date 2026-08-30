@@ -253,9 +253,24 @@ def _norm(*parts: str) -> str:
 
 # --------------------------------------------------------------- Job-Handler
 async def handle_download(job: dict[str, Any]) -> str:
+    """Bricht der Download ab, muss der Titel das auch anzeigen.
+
+    Vorher blieb er auf "downloading" stehen: der Zustand wurde vor dem
+    eigentlichen Versuch gesetzt und bei einer Ausnahme nie korrigiert. In der
+    Oberflaeche sah ein laengst gescheiterter Download damit aus, als liefe er
+    noch - und zwar fuer immer.
+    """
+    virtual_id: str = job["payload"]["virtual_id"]
+    try:
+        return await _run_download(job, virtual_id)
+    except Exception as exc:
+        await ids.set_state(virtual_id, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
+        raise
+
+
+async def _run_download(job: dict[str, Any], virtual_id: str) -> str:
     payload = job["payload"]
     job_id = int(job["id"])
-    virtual_id: str = payload["virtual_id"]
 
     row = await ids.load(virtual_id)
     if not row:

@@ -335,7 +335,13 @@ $('#search-form').addEventListener('submit', async (event) => {
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(query)}`);
 
-    $('#search-local').innerHTML = (data.local || []).map((song) => `
+    const hinweis = data.corrected
+      ? `<div class="item"><div class="main"><div class="sub">
+           Keine Treffer für „${esc(query)}“ — zeige „${esc(data.corrected)}“
+         </div></div></div>`
+      : '';
+
+    $('#search-local').innerHTML = hinweis + (data.local || []).map((song) => `
       <div class="item"><div class="main">
         <div class="title">${esc(song.artist)} — ${esc(song.title)}</div>
         <div class="sub">${esc(song.album || '')} · ${esc(song.suffix || '')} ${song.bitRate || ''} kbit/s</div>
@@ -343,13 +349,23 @@ $('#search-form').addEventListener('submit', async (event) => {
 
     $('#search-catalog').innerHTML = (data.catalog || []).map((track) => {
       const known = track.known;
-      const badge = known?.navidrome_id
-        ? '<span class="pill ok">vorhanden</span>'
-        : known ? `<span class="pill running">${esc(known.state)}</span>`
-                : `<button class="tiny primary" data-download="${esc(track.provider_id)}">Laden</button>`;
+      // Ein fehlgeschlagener Titel muss erneut anstoßbar sein und seinen
+      // Grund zeigen - sonst steht dort nur ein Zustand ohne Erklärung.
+      let badge;
+      if (known?.navidrome_id) {
+        badge = '<span class="pill ok">vorhanden</span>';
+      } else if (known && known.state === 'failed') {
+        badge = `<span class="pill err">fehlgeschlagen</span>
+                 <button class="tiny" data-download="${esc(track.provider_id)}">Erneut</button>`;
+      } else if (known && known.state !== 'virtual') {
+        badge = `<span class="pill running">${esc(known.state)}</span>`;
+      } else {
+        badge = `<button class="tiny primary" data-download="${esc(track.provider_id)}">Laden</button>`;
+      }
+      const grund = known?.error ? ` · ${esc(known.error)}` : '';
       return `<div class="item"><div class="main">
         <div class="title">${esc(track.artist)} — ${esc(track.title)}</div>
-        <div class="sub">${esc(track.album || '')} · ${duration(track.duration)}</div>
+        <div class="sub">${esc(track.album || '')} · ${duration(track.duration)}${grund}</div>
       </div><div class="side">${badge}</div></div>`;
     }).join('');
   } catch (exc) { toast(exc.message, 'err'); }
