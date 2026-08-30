@@ -118,6 +118,16 @@ with TestClient(app) as client:
     check("Navidrome-Scan ohne Zugangsdaten -> 409", blocked.status_code == 409,
           blocked.text[:110])
 
+    info = client.get("/api/navidrome/credentials")
+    check("Zugangs-Status abfragbar",
+          info.status_code == 200 and info.json()["configured"] is False, info.text[:110])
+
+    # Navidrome ist im Test nicht erreichbar -> 503 statt stiller Ablage.
+    rejected = client.post("/api/navidrome/credentials",
+                           json={"username": "admin", "password": "x"}, headers=headers)
+    check("Zugang ohne erreichbares Navidrome -> 503", rejected.status_code == 503,
+          rejected.text[:110])
+
     report = client.get("/api/preflight")
     check("Preflight antwortet", report.status_code == 200, report.text[:100])
     if report.status_code == 200:

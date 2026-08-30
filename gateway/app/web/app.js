@@ -161,6 +161,14 @@ $('#nav').addEventListener('click', (event) => {
   if (button) switchView(button.dataset.view);
 });
 
+// Verweise aus Hinweistexten heraus, etwa "Unter Diagnose eintragen".
+document.addEventListener('click', (event) => {
+  const link = event.target.closest('[data-view-link]');
+  if (!link) return;
+  event.preventDefault();
+  switchView(link.dataset.viewLink);
+});
+
 // --------------------------------------------------------------- SSE-Live
 function connectStream() {
   if (state.stream) state.stream.close();
@@ -208,6 +216,15 @@ async function loadOverview() {
   const disk = status.storage?.music || {};
   const jobs = status.jobs || {};
   const virtual = status.virtual || {};
+
+  // Ohne Navidrome-Zugang laeuft der Import nur halb - das gehoert nach oben,
+  // nicht in eine Kachel, die man fuer Deko halten kann.
+  $('#overview-hint').innerHTML = (nd.online && !nd.authenticated)
+    ? `<p class="notice">Kein Navidrome-Zugang. Importierte Titel lassen sich
+         dann nicht auf ihre ID auflösen.
+         <a href="#" data-view-link="diagnostics">Unter Diagnose eintragen</a> —
+         oder einmal mit einem Musik-Client auf Port 8080 anmelden.</p>`
+    : '';
 
   $('#tiles').innerHTML = [
     tile('Navidrome',
@@ -545,8 +562,37 @@ async function loadDiagnostics() {
        ${pre.counts.fail} Prüfung(en) fehlgeschlagen. Vor dem ersten Download beheben —
        sonst laufen Downloads ins Leere oder landen an der falschen Stelle.</p>`;
 
+  const cred = await api('/api/navidrome/credentials');
+  const quelle = { env: 'aus der Umgebung (NAVIDROME_PASSWORD)',
+                   manual: 'hier hinterlegt',
+                   borrowed: 'von einem angemeldeten Musik-Client übernommen' };
+
+  const zugang = cred.configured
+    ? `<p>Verbunden als <strong>${esc(cred.username)}</strong> —
+         ${esc(quelle[cred.source] || 'vorhanden')}.</p>
+       ${cred.editable
+         ? '<button id="cred-clear" class="ghost">Zugang entfernen</button>'
+         : '<p class="muted">In der Umgebung gesetzt — hier nicht änderbar.</p>'}`
+    : `<p class="muted">Der Gateway braucht einen Navidrome-Zugang, um importierte
+         Titel auf ihre ID aufzulösen und Scans anzustoßen. Es genügt ein
+         normaler Navidrome-Benutzer; für den Scan-Anstoß ein Administrator.</p>
+       <form id="cred-form" class="row">
+         <input name="username" placeholder="Navidrome-Benutzer" autocomplete="off" required>
+         <input name="password" type="password" placeholder="Passwort"
+                autocomplete="off" required>
+         <button class="primary" type="submit">Verbinden</button>
+       </form>
+       <p class="muted" style="margin-top:.6rem">
+         Das Passwort wird nicht gespeichert — daraus entsteht einmalig ein
+         Subsonic-Token, und nur das liegt in der Datenbank.
+       </p>`;
+
   $('#diagnostics-body').innerHTML = `
     ${readiness}
+    <div class="card">
+      <h3>Navidrome-Zugang</h3>
+      ${zugang}
+    </div>
     <div class="card">
       <h3>Startprüfung</h3>
       <div class="list">
@@ -612,6 +658,37 @@ async function loadDiagnostics() {
       </table>
     </div>`;
 }
+
+// Formular und Knopf entstehen erst beim Rendern der Diagnose-Seite,
+// deshalb delegiert am Dokument statt direkt gebunden.
+document.addEventListener('submit', async (event) => {
+  const form = event.target.closest('#cred-form');
+  if (!form) return;
+  event.preventDefault();
+  const data = new FormData(form);
+  const button = form.querySelector('button');
+  button.disabled = true;
+  try {
+    await api('/api/navidrome/credentials', {
+      method: 'POST',
+      body: { username: data.get('username'), password: data.get('password') },
+    });
+    toast('Mit Navidrome verbunden', 'ok');
+    await loadDiagnostics();
+  } catch (exc) {
+    toast(exc.message, 'err');
+    button.disabled = false;
+  }
+});
+
+document.addEventListener('click', async (event) => {
+  if (!event.target.closest('#cred-clear')) return;
+  try {
+    await api('/api/navidrome/credentials', { method: 'DELETE' });
+    toast('Zugang entfernt', 'ok');
+    await loadDiagnostics();
+  } catch (exc) { toast(exc.message, 'err'); }
+});
 
 // ----------------------------------------------------------------- Konto
 async function loadAccount() {

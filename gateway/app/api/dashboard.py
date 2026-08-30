@@ -200,12 +200,12 @@ async def request_download(
 async def trigger_scan(body: ScanBody, user: dict = Depends(security.guarded)) -> dict:
     # Ohne Zugangsdaten waere der Job zum Scheitern verurteilt. Lieber hier
     # sagen warum, als drei Fehlermeldungen im Ereignisprotokoll erzeugen.
-    if not navidrome.has_credentials():
+    if not await navidrome.has_credentials_async():
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Navidrome-Scan braucht Zugangsdaten. Melde dich einmal mit einem "
-            "Musik-Client auf Port 8080 an - der Gateway uebernimmt dessen Token. "
-            "Alternativ NAVIDROME_PASSWORD setzen. Navidrome erkennt neue Dateien "
+            "Navidrome-Scan braucht Zugangsdaten. Trag sie unter Diagnose ein - "
+            "oder melde dich einmal mit einem Musik-Client auf Port 8080 an, dann "
+            "uebernimmt der Gateway dessen Token. Navidrome erkennt neue Dateien "
             "ohnehin selbst (ND_MONITORCHANGES).",
         )
     job_id = await jobs.enqueue(
@@ -226,6 +226,45 @@ async def import_staging(user: dict = Depends(security.guarded)) -> dict:
 
 
 # --------------------------------------------------------------- Diagnose
+class NavidromeCredentialsBody(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+
+
+@router.get("/navidrome/credentials")
+async def navidrome_credentials(user: dict = Depends(security.current_user)) -> dict:
+    return await navidrome.credentials_info()
+
+
+@router.post("/navidrome/credentials")
+async def set_navidrome_credentials(
+    body: NavidromeCredentialsBody, user: dict = Depends(security.guarded)
+) -> dict:
+    """Navidrome-Zugang von Hand hinterlegen.
+
+    Wird sofort gegen Navidrome geprueft - ein Tippfehler faellt hier auf und
+    nicht erst beim naechsten Download.
+    """
+    if not await navidrome.reachable():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Navidrome ist unter {settings.navidrome_url} nicht erreichbar",
+        )
+    try:
+        await navidrome.set_credentials(body.username, body.password)
+    except navidrome.NavidromeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    await events.emit(f"Navidrome-Zugang hinterlegt: {body.username}", category="system")
+    return await navidrome.credentials_info()
+
+
+@router.delete("/navidrome/credentials")
+async def delete_navidrome_credentials(user: dict = Depends(security.guarded)) -> dict:
+    await navidrome.clear_credentials()
+    return await navidrome.credentials_info()
+
+
 @router.get("/preflight")
 async def preflight_report(user: dict = Depends(security.current_user)) -> dict:
     """Passt die Konfiguration zum System? Vor dem ersten Download aufrufen."""

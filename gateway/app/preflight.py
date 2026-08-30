@@ -134,7 +134,7 @@ def path_checks() -> list[dict[str, str]]:
 
 
 # --------------------------------------------------------------- Einstellungen
-def config_checks() -> list[dict[str, str]]:
+async def config_checks() -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
 
     if settings.stream_mode not in ("defer", "stream"):
@@ -179,17 +179,20 @@ def config_checks() -> list[dict[str, str]]:
 
     if settings.navidrome_password:
         out.append(_check("Navidrome-Zugang", "ok", f"eigener Account '{settings.navidrome_user}'"))
-    elif navidrome.has_credentials():
+    elif await navidrome.has_credentials_async():
+        info = await navidrome.credentials_info()
+        quelle = {"manual": "im Dashboard hinterlegt",
+                  "borrowed": "von einem angemeldeten Client uebernommen"}.get(
+                      info.get("source"), "vorhanden")
         out.append(
             _check("Navidrome-Zugang", "ok",
-                   "Zugangsdaten von einem angemeldeten Client uebernommen")
+                   f"{info.get('username')} - {quelle}")
         )
     else:
         out.append(
             _check("Navidrome-Zugang", "warn",
-                   "noch keine. Sobald sich ein Client ueber Port 8080 anmeldet, "
-                   "uebernimmt der Gateway dessen Token fuer Scan und "
-                   "ID-Aufloesung. Alternativ NAVIDROME_PASSWORD setzen.")
+                   "noch keine. Unter Diagnose eintragen, oder sie werden uebernommen, "
+                   "sobald sich ein Client ueber Port 8080 anmeldet.")
         )
 
     out.append(
@@ -230,7 +233,7 @@ async def service_checks() -> list[dict[str, str]]:
                    f"{info.get('type', '?')} {info.get('serverVersion', '')}".strip())
         )
         # Erreichbar heisst noch nicht: Zugangsdaten stimmen.
-        if not navidrome.has_credentials():
+        if not await navidrome.has_credentials_async():
             out.append(
                 _check("Navidrome-Anmeldung", "warn",
                        "noch keine Zugangsdaten - kommt mit der ersten "
@@ -279,7 +282,7 @@ async def service_checks() -> list[dict[str, str]]:
 
 # ------------------------------------------------------------------- Gesamt
 async def run(include_services: bool = True) -> dict[str, Any]:
-    checks = path_checks() + config_checks()
+    checks = path_checks() + await config_checks()
     if include_services:
         checks += await service_checks()
 

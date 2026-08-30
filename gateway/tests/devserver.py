@@ -30,7 +30,8 @@ os.environ.setdefault("MUSIC_DIR", str(BASE / "music"))
 os.environ.setdefault("STAGING_DIR", str(BASE / "staging"))
 os.environ.setdefault("QUARANTINE_DIR", str(BASE / "quarantine"))
 os.environ.setdefault("NAVIDROME_URL", "http://127.0.0.1:4533")
-os.environ.setdefault("NAVIDROME_PASSWORD", "dev")
+# Bewusst kein Passwort: das ist der Auslieferungszustand. Der Zugang wird
+# im Dashboard unter Diagnose hinterlegt.
 os.environ.setdefault("DEEMIX_URL", "http://127.0.0.1:6595")
 os.environ.setdefault("GATEWAY_ADMIN_USER", "admin")
 os.environ.setdefault("GATEWAY_ADMIN_PASSWORD", "devpassword123")

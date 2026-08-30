@@ -85,6 +85,29 @@ docker compose logs gateway-api | grep -A2 Start-Passwort
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+### Navidrome verbinden
+
+Der Gateway braucht selbst Zugriff auf die Navidrome-API, um importierte Titel
+auf ihre echte ID aufzulösen und Scans anzustoßen. Dafür gibt es drei Wege, in
+dieser Reihenfolge:
+
+1. **Im Dashboard unter *Diagnose*** — Benutzer und Passwort eintragen, fertig.
+   Der Zugang wird sofort gegen Navidrome geprüft; ein Tippfehler fällt dort
+   auf und nicht erst beim ersten Download.
+2. **Automatisch**, sobald sich ein Musik-Client über Port 8080 anmeldet
+   (siehe unten). Ein von Hand eingetragener Zugang wird dabei nicht
+   überschrieben.
+3. **`NAVIDROME_PASSWORD`** in der Umgebung. Setzt die anderen beiden außer
+   Kraft.
+
+**Das Passwort wird in keinem Fall gespeichert.** Subsonic authentifiziert über
+`md5(passwort + salt)` — dieses Tripel wird einmal erzeugt, und nur es landet
+in der Datenbank. Ein Blick hinein gibt das Navidrome-Passwort nicht her.
+
+Für den Scan-Anstoß braucht es einen Administrator; zum Auflösen von Titel-IDs
+genügt jeder Navidrome-Benutzer. Ohne Scan-Rechte funktioniert trotzdem alles,
+denn `ND_MONITORCHANGES` lässt Navidrome neue Dateien selbst bemerken.
+
 ### Wie der Gateway ohne Navidrome-Passwort auskommt
 
 Der Gateway braucht selbst Zugriff auf die Navidrome-API, um importierte Titel

@@ -73,25 +73,102 @@ def _unwrap(payload: dict[str, Any]) -> dict[str, Any]:
 # kein Admin, schlaegt nur der Scan-Anstoss fehl - ND_MONITORCHANGES faengt
 # das auf, und die Titelsuche zum Aufloesen funktioniert fuer jeden Benutzer.
 _BORROW_KEY = "navidrome.borrowed_auth"
+_SOURCE_KEY = "navidrome.auth_source"
+_AUTH_KEYS = ("u", "t", "s", "p")
+
 _borrowed: dict[str, str] | None = None
+_source: str | None = None
+
+
+async def _store(params: dict[str, str], source: str) -> None:
+    global _borrowed, _source
+    _borrowed = {k: v for k, v in params.items() if k in _AUTH_KEYS and v}
+    _source = source
+    from ..db import db
+
+    await db.set_setting(_BORROW_KEY, json.dumps(_borrowed))
+    await db.set_setting(_SOURCE_KEY, source)
+
+
+async def set_credentials(username: str, password: str) -> None:
+    """Im Dashboard hinterlegte Zugangsdaten pruefen und ablegen.
+
+    Gespeichert wird NICHT das Passwort, sondern das daraus einmalig erzeugte
+    Subsonic-Tripel (Benutzer, Token, Salt). Das reicht fuer die API und ist
+    genau so viel wert wie das, was jeder Client ohnehin bei jeder Anfrage
+    ueber die Leitung schickt - aber ein Blick in die Datenbank gibt das
+    Navidrome-Passwort nicht mehr her.
+    """
+    params = auth_params(username, password)
+    if not await verify_client_credentials(params):
+        raise NavidromeError("Navidrome lehnt diese Zugangsdaten ab")
+    await _store(params, "manual")
+    log.info("Navidrome-Zugangsdaten fuer '%s' hinterlegt", username)
+
+
+async def clear_credentials() -> None:
+    global _borrowed, _source
+    _borrowed, _source = {}, None
+    from ..db import db
+
+    await db.set_setting(_BORROW_KEY, "")
+    await db.set_setting(_SOURCE_KEY, "")
+    log.info("Navidrome-Zugangsdaten entfernt")
 
 
 async def remember_credentials(params: dict[str, str]) -> None:
-    """Nach erfolgreicher Client-Anmeldung aufrufen."""
-    global _borrowed
+    """Nach erfolgreicher Client-Anmeldung aufrufen.
+
+    Greift nur, solange nichts von Hand hinterlegt wurde - eine bewusste
+    Entscheidung im Dashboard soll nicht vom naechsten Client ueberschrieben
+    werden.
+    """
     if settings.navidrome_password:
         return
-    keep = {k: v for k, v in params.items() if k in ("u", "t", "s", "p") and v}
+    await _load()
+    if _source == "manual":
+        return
+    keep = {k: v for k, v in params.items() if k in _AUTH_KEYS and v}
     if not keep.get("u") or _borrowed == keep:
         return
-    _borrowed = keep
     try:
-        from ..db import db
-
-        await db.set_setting(_BORROW_KEY, json.dumps(keep))
+        await _store(keep, "borrowed")
         log.info("Zugangsdaten von Benutzer '%s' uebernommen", keep["u"])
     except Exception as exc:  # pragma: no cover
         log.debug("Zugangsdaten nicht gespeichert: %s", exc)
+
+
+async def _load() -> None:
+    global _borrowed, _source
+    if _borrowed is not None:
+        return
+    try:
+        from ..db import db
+
+        stored = await db.get_setting(_BORROW_KEY)
+        _borrowed = json.loads(stored) if stored else {}
+        _source = await db.get_setting(_SOURCE_KEY) or None
+    except Exception:
+        _borrowed, _source = {}, None
+
+
+async def credentials_info() -> dict[str, Any]:
+    """Fuer das Dashboard: woher stammt der Zugang, und auf welchen Benutzer
+    laeuft er?"""
+    if settings.navidrome_password:
+        return {
+            "configured": True,
+            "source": "env",
+            "username": settings.navidrome_user,
+            "editable": False,
+        }
+    await _load()
+    return {
+        "configured": bool(_borrowed),
+        "source": _source,
+        "username": (_borrowed or {}).get("u"),
+        "editable": True,
+    }
 
 
 class NoCredentials(NavidromeError, PermanentError):
@@ -104,21 +181,14 @@ class NoCredentials(NavidromeError, PermanentError):
 
 
 async def _credentials() -> dict[str, str]:
-    global _borrowed
     if settings.navidrome_password:
         return auth_params()
 
-    if _borrowed is None:
-        try:
-            from ..db import db
-
-            stored = await db.get_setting(_BORROW_KEY)
-            _borrowed = json.loads(stored) if stored else {}
-        except Exception:
-            _borrowed = {}
-
+    await _load()
     if _borrowed:
-        return {**_borrowed, "v": API_VERSION, "c": CLIENT_NAME, "f": "json"}
+        query = {k: v for k, v in _borrowed.items() if k in _AUTH_KEYS}
+        query.update({"v": API_VERSION, "c": CLIENT_NAME, "f": "json"})
+        return query
 
     # Frueher wurde hier mit leerem Passwort angefragt. Das erzeugte bei jedem
     # Dashboard-Aufruf drei abgelehnte Anmeldungen in Navidromes Log - unnoetig
@@ -130,7 +200,16 @@ async def _credentials() -> dict[str, str]:
 
 
 def has_credentials() -> bool:
+    """Synchron, fuer Aufrufer im Anfragepfad. Beim allerersten Aufruf ist der
+    Cache noch nicht gefuellt - dann entscheidet der naechste echte Aufruf."""
     return bool(settings.navidrome_password or _borrowed)
+
+
+async def has_credentials_async() -> bool:
+    if settings.navidrome_password:
+        return True
+    await _load()
+    return bool(_borrowed)
 
 
 async def reachable() -> bool:
@@ -180,7 +259,7 @@ async def server_info() -> dict[str, Any]:
     gilt trotzdem als online, wenn /ping antwortet. Andernfalls stuende im
     Dashboard "offline", obwohl Navidrome laeuft und nur das Token fehlt.
     """
-    if not has_credentials():
+    if not await has_credentials_async():
         online = await reachable()
         return {
             "online": online,
