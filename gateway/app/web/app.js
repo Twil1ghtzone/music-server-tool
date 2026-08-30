@@ -318,6 +318,8 @@ function renderQueue(items) {
       <div class="side">
         <span class="muted">${item.play_requests}×</span>
         <span class="pill ${STATE_PILL[item.state] ?? ''}">${esc(item.state)}</span>
+        ${item.state === 'failed' && item.provider_id
+          ? `<button class="tiny" data-download="${esc(item.provider_id)}">Erneut</button>` : ''}
       </div>
     </div>`).join('');
 }

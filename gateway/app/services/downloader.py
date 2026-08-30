@@ -434,9 +434,35 @@ async def request_track(provider_id: str, *, provider: str = deezer.PROVIDER) ->
     return {"id": virtual_id, "state": "queued", "job": job_id}
 
 
+async def reset_orphaned_states() -> int:
+    """Titel, die laut Datenbank noch laufen, zu denen es aber keinen Job mehr
+    gibt, auf 'failed' setzen.
+
+    Passiert nach einem Absturz oder einem Update mitten im Download: der Job
+    ist weg, der Titel steht aber weiter auf 'downloading' - und zwar fuer
+    immer, weil ihn niemand mehr anfasst. In der Oberflaeche sieht das aus wie
+    ein ewig laufender Download.
+    """
+    return await db.execute(
+        """
+        UPDATE virtual_track
+           SET state = 'failed',
+               error = COALESCE(error, 'Unterbrochen - kein laufender Job mehr'),
+               updated_at = datetime('now')
+         WHERE state IN ('queued', 'downloading', 'importing')
+           AND navidrome_id IS NULL
+           AND id NOT IN (
+                 SELECT json_extract(payload, '$.virtual_id') FROM job
+                  WHERE state IN ('pending', 'running')
+                    AND json_extract(payload, '$.virtual_id') IS NOT NULL)
+        """
+    )
+
+
 async def queue_overview(limit: int = 50) -> list[dict]:
     return await db.fetch_all(
-        "SELECT id, title, artist, album, state, error, play_requests, updated_at "
+        "SELECT id, provider_id, title, artist, album, state, error, "
+        "       play_requests, updated_at "
         "FROM virtual_track WHERE state != 'virtual' ORDER BY updated_at DESC LIMIT ?",
         (limit,),
     )

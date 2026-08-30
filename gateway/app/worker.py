@@ -118,6 +118,10 @@ async def main() -> None:
     if orphans:
         log.info("%d unterbrochene Jobs zurueck in die Queue gestellt", orphans)
 
+    stale = await downloader.reset_orphaned_states()
+    if stale:
+        log.info("%d Titel aus haengenden Zustaenden geloest", stale)
+
     log.info(
         "Worker bereit (Parallelitaet %d, Musik %s, Staging %s)",
         settings.worker_concurrency,

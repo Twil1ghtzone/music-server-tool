@@ -218,6 +218,33 @@ check("Fingerprint: fremder Titel unter der Schwelle",
       dedupe.similarity(a, other) < dedupe.ACOUSTIC_MATCH_THRESHOLD,
       str(dedupe.similarity(a, other)))
 
+# Haengende Zustaende: ein Titel auf 'downloading' ohne Job muss aufgeloest
+# werden, sonst laeuft er in der Oberflaeche ewig weiter.
+import asyncio  # noqa: E402
+
+from app import db as _dbmod  # noqa: E402
+
+
+async def _orphan_case() -> tuple[str, int]:
+    # Eigene Datenbank: die der App ist nach dem TestClient-Block geschlossen.
+    _dbmod.configure(BASE / "data" / "orphan.db")
+    await _dbmod.db.connect()
+    await _dbmod.db.execute(
+        "INSERT INTO virtual_track(id, provider, provider_id, title, state) "
+        "VALUES ('mgv-dz-777', 'dz', '777', 'Haenger', 'downloading')"
+    )
+    geloest = await downloader.reset_orphaned_states()
+    row = await _dbmod.db.fetch_one(
+        "SELECT state FROM virtual_track WHERE id = 'mgv-dz-777'"
+    )
+    await _dbmod.db.close()
+    return row["state"], geloest
+
+
+_state, _resolved = asyncio.run(_orphan_case())
+check("Haengender Titel wird beim Start geloest", _state == "failed" and _resolved == 1,
+      f"{_state}, {_resolved} betroffen")
+
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
 check("NoCredentials ist ein permanenter Fehler",
       issubclass(navidrome.NoCredentials, PermanentError))
