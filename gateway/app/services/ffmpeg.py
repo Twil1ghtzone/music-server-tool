@@ -221,16 +221,19 @@ async def notice_clip() -> Path | None:
 
 
 async def available() -> dict[str, bool]:
-    """Fuer die Diagnose-Seite."""
-    out: dict[str, bool] = {}
-    for name, binary in (
+    """Fuer die Diagnose-Seite. Alle drei parallel."""
+    tools = (
         ("ffmpeg", settings.ffmpeg_bin),
         ("ffprobe", settings.ffprobe_bin),
         ("fpcalc", settings.fpcalc_bin),
-    ):
+    )
+
+    async def one(binary: str) -> bool:
         try:
             code, _, _ = await run([binary, "-version"], timeout=10.0)
-            out[name] = code == 0
+            return code == 0
         except ToolError:
-            out[name] = False
-    return out
+            return False
+
+    results = await asyncio.gather(*(one(binary) for _, binary in tools))
+    return {name: ok for (name, _), ok in zip(tools, results)}

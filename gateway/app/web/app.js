@@ -510,12 +510,42 @@ $('#tag-files').addEventListener('click', async (event) => {
 });
 
 // -------------------------------------------------------------- Diagnose
+const CHECK_PILL = { ok: 'ok', warn: 'warn', fail: 'err' };
+const CHECK_LABEL = { ok: 'ok', warn: 'hinweis', fail: 'fehler' };
+
 async function loadDiagnostics() {
-  const data = await api('/api/diagnostics');
+  // Die Prüfung fragt echte Dienste ab und braucht ein paar Sekunden. Ohne
+  // Platzhalter sieht die leere Seite so lange aus wie ein Fehler.
+  $('#diagnostics-body').innerHTML =
+    '<div class="card"><p class="muted">Prüfe Pfade, Rechte und Dienste…</p></div>';
+  const [data, pre] = await Promise.all([api('/api/diagnostics'), api('/api/preflight')]);
   const flag = (value) => value
     ? '<span class="pill ok">ok</span>' : '<span class="pill err">fehlt</span>';
 
+  const readiness = pre.ready
+    ? `<p class="notice">Startprüfung bestanden — bereit für den ersten Download.
+       ${pre.counts.warn} Hinweis(e).</p>`
+    : `<p class="notice" style="border-color:var(--err);background:#2a1618;color:#ffb4ae">
+       ${pre.counts.fail} Prüfung(en) fehlgeschlagen. Vor dem ersten Download beheben —
+       sonst laufen Downloads ins Leere oder landen an der falschen Stelle.</p>`;
+
   $('#diagnostics-body').innerHTML = `
+    ${readiness}
+    <div class="card">
+      <h3>Startprüfung</h3>
+      <div class="list">
+        ${pre.checks.map((check) => `
+          <div class="item">
+            <div class="main">
+              <div class="title">${esc(check.name)}</div>
+              <div class="sub">${esc(check.detail)}</div>
+            </div>
+            <div class="side">
+              <span class="pill ${CHECK_PILL[check.status]}">${CHECK_LABEL[check.status]}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
     <div class="tiles">
       ${tile('Navidrome', data.navidrome.online ? 'online' : 'offline',
              data.navidrome.serverVersion || data.navidrome.error || '',

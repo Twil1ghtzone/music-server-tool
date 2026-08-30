@@ -32,6 +32,10 @@ from . import jobs, tags
 log = get_logger("downloader")
 
 POLL_INTERVAL = 2.0
+# So viele Messungen mit unveraenderter Groesse gelten als "fertig geschrieben".
+STABLE_CHECKS = 2
+# Alles darunter ist mit Sicherheit ein Fragment, kein Track.
+MIN_COMPLETE_BYTES = 64 * 1024
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -40,6 +44,27 @@ def safe_component(value: str, fallback: str = "Unbekannt") -> str:
     cleaned = _ILLEGAL.sub("_", (value or "").strip()).strip(". ")
     cleaned = re.sub(r"\s+", " ", cleaned)
     return (cleaned or fallback)[:120]
+
+
+def plan_destination(source: Path, track: dict[str, Any]) -> Path:
+    """Wohin die frisch geladene Datei in der Bibliothek gehoert.
+
+    Standard ist `preserve`: die Struktur, die Deemix anhand der eigenen
+    Trackname-/Album-/Playlist-Templates erzeugt hat, wird eins zu eins in die
+    Bibliothek uebernommen. Das ist der einzige Weg, der garantiert zum
+    bestehenden Bestand passt - denn der wurde von genau denselben Templates
+    erzeugt, als Deemix noch direkt in die Bibliothek geschrieben hat.
+
+    `tags` leitet den Pfad stattdessen selbst ab. Nur sinnvoll, wenn die
+    Bibliothek ohnehin auf Interpret/Album/NN - Titel umgestellt werden soll.
+    """
+    if settings.import_layout != "tags":
+        try:
+            return settings.music_dir / source.relative_to(settings.staging_dir)
+        except ValueError:
+            # Datei liegt ausserhalb des Staging - dann bleibt nur der Name.
+            return settings.music_dir / source.name
+    return target_path(track, source)
 
 
 def target_path(track: dict[str, Any], source: Path) -> Path:
@@ -99,11 +124,60 @@ def move_into_library(source: Path, destination: Path) -> Path:
         return destination
 
 
+def move_sidecars(source: Path, destination: Path) -> list[Path]:
+    """Nimmt Lyrics und Cover mit, die Deemix neben den Track gelegt hat.
+
+    Navidrome ist hier laut Konfiguration auf .lrc angewiesen
+    (ND_LYRICSPRIORITY). Bliebe die Datei im Staging liegen, waere der Titel
+    zwar da, der Songtext aber weg - und niemand wuesste, warum.
+
+    Mitgenommen wird alles mit gleichem Dateinamen-Stamm plus die typischen
+    Ordnerbilder (cover.jpg, folder.jpg).
+    """
+    moved: list[Path] = []
+    candidates: list[Path] = []
+
+    for extension in settings.sidecar_extensions:
+        twin = source.with_suffix(extension)
+        if twin.exists():
+            candidates.append(twin)
+
+    for name in ("cover", "folder", "front", "album"):
+        for extension in (".jpg", ".jpeg", ".png", ".webp"):
+            image = source.parent / f"{name}{extension}"
+            if image.exists() and image not in candidates:
+                candidates.append(image)
+
+    for candidate in candidates:
+        try:
+            if candidate.stem == source.stem:
+                target = destination.with_suffix(candidate.suffix)
+            else:
+                target = destination.parent / candidate.name
+            if target.exists():
+                # Vorhandenes Cover im Bestand nie ueberschreiben.
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(candidate, target)
+            moved.append(target)
+        except OSError as exc:
+            log.debug("Begleitdatei %s nicht verschoben: %s", candidate, exc)
+    return moved
+
+
 # --------------------------------------------------------------- Warten
 async def wait_for_new_file(before: dict[Path, int], deadline: float,
                             job_id: int | None = None) -> Path | None:
-    """Wartet auf eine neue, vollstaendig geschriebene Audiodatei im Staging."""
-    stable: dict[Path, int] = {}
+    """Wartet auf eine neue, vollstaendig geschriebene Audiodatei im Staging.
+
+    "Vollstaendig" heisst: die Groesse ist ueber mehrere Messungen unveraendert
+    geblieben. Eine einzelne Wiederholung reicht nicht - eine kurze Pause im
+    Download wuerde sonst als fertig durchgehen und eine halbe Datei landete
+    in der Bibliothek.
+    """
+    sizes: dict[Path, int] = {}
+    steady: dict[Path, int] = {}
+
     while time.monotonic() < deadline:
         await asyncio.sleep(POLL_INTERVAL)
         current = scan_audio(settings.staging_dir)
@@ -111,16 +185,21 @@ async def wait_for_new_file(before: dict[Path, int], deadline: float,
 
         for path in fresh:
             size = current[path]
-            if size <= 0:
+            if size < MIN_COMPLETE_BYTES:
                 continue
-            if stable.get(path) == size:
-                stable[path] = size
-                # Zweimal dieselbe Groesse -> Schreibvorgang beendet.
-                return path
-            stable[path] = size
+            if sizes.get(path) == size:
+                steady[path] = steady.get(path, 0) + 1
+                if steady[path] >= STABLE_CHECKS:
+                    return path
+            else:
+                steady[path] = 0
+            sizes[path] = size
 
         if job_id and fresh:
-            await jobs.progress(job_id, 0.5, f"Datei im Staging: {fresh[0].name}")
+            await jobs.progress(
+                job_id, 0.45, f"Deemix schreibt: {fresh[0].name} ({fresh[0].stat().st_size // 1024} KB)"
+                if fresh[0].exists() else f"Deemix schreibt: {fresh[0].name}"
+            )
     return None
 
 
@@ -219,9 +298,15 @@ async def handle_download(job: dict[str, Any]) -> str:
     except Exception as exc:
         log.warning("Tag-Korrektur fehlgeschlagen (%s): %s", source.name, exc)
 
-    destination = move_into_library(source, target_path(dict(row), source))
+    destination = move_into_library(source, plan_destination(source, dict(row)))
+    sidecars = move_sidecars(source, destination)
     _cleanup_empty_dirs(settings.staging_dir)
-    await jobs.progress(job_id, 0.75, f"In Bibliothek: {destination.name}")
+    await jobs.progress(
+        job_id,
+        0.75,
+        f"In Bibliothek: {destination.name}"
+        + (f" (+{len(sidecars)} Begleitdatei(en))" if sidecars else ""),
+    )
 
     try:
         await navidrome.start_scan()
@@ -258,7 +343,8 @@ async def handle_import_staging(job: dict[str, Any]) -> str:
         try:
             meta = tags.read(source)
             meta.setdefault("album_artist", meta.get("artist"))
-            destination = move_into_library(source, target_path(meta, source))
+            destination = move_into_library(source, plan_destination(source, meta))
+            move_sidecars(source, destination)
             moved += 1
             log.info("Staging-Import: %s", destination)
         except Exception as exc:

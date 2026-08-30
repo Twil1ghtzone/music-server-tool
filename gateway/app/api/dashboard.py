@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .. import events, security
+from .. import events, preflight, security
 from ..clients import deemix, deezer, navidrome
 from ..config import settings
 from ..db import db
@@ -216,6 +216,12 @@ async def import_staging(user: dict = Depends(security.guarded)) -> dict:
 
 
 # --------------------------------------------------------------- Diagnose
+@router.get("/preflight")
+async def preflight_report(user: dict = Depends(security.current_user)) -> dict:
+    """Passt die Konfiguration zum System? Vor dem ersten Download aufrufen."""
+    return await preflight.run()
+
+
 @router.get("/diagnostics")
 async def diagnostics(user: dict = Depends(security.current_user)) -> dict:
     nd, dz, dx, tools = await asyncio.gather(

@@ -42,6 +42,17 @@ class BatchTagBody(BaseModel):
     changes: TagBody
 
 
+def _require_tag_write() -> None:
+    """Tags zu schreiben veraendert vorhandene Dateien. Standardmaessig aus,
+    damit ein Fehlklick im ersten Betrieb den Bestand nicht anfasst."""
+    if not settings.allow_tag_write:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tag-Schreiben ist gesperrt. Zum Freischalten GATEWAY_ALLOW_TAG_WRITE=true "
+            "setzen und den Stack neu starten.",
+        )
+
+
 # ------------------------------------------------------------------ Index
 @router.get("/stats")
 async def stats(user: dict = Depends(security.current_user)) -> dict:
@@ -125,6 +136,12 @@ async def find_dupes(
 @router.post("/dupes/apply")
 async def apply_dupes(body: ApplyBody, user: dict = Depends(security.guarded)) -> dict:
     """Verschiebt die Nicht-Keeper in die Quarantaene. Kein Loeschen."""
+    if not settings.allow_dedupe_apply:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Bereinigung ist gesperrt. Zum Freischalten GATEWAY_ALLOW_DEDUPE_APPLY=true "
+            "setzen und den Stack neu starten.",
+        )
     job_id = await jobs.enqueue(
         jobs.APPLY_DUPES,
         {"groups": body.groups},
@@ -168,6 +185,7 @@ async def restore_group(group_id: int, user: dict = Depends(security.guarded)) -
 async def edit_tags(
     file_id: int, body: TagBody, user: dict = Depends(security.guarded)
 ) -> dict:
+    _require_tag_write()
     row = await db.fetch_one("SELECT * FROM media_file WHERE id = ?", (file_id,))
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Datei nicht gefunden")
@@ -192,6 +210,7 @@ async def edit_tags(
 
 @router.post("/files/tags/batch")
 async def batch_tags(body: BatchTagBody, user: dict = Depends(security.guarded)) -> dict:
+    _require_tag_write()
     changes = {k: v for k, v in body.changes.model_dump(exclude_unset=True).items()}
     if not changes:
         return {"ok": True, "changed": 0}

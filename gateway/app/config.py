@@ -70,6 +70,23 @@ class Settings:
     search_cache_ttl: int = field(default_factory=lambda: _env_int("GATEWAY_SEARCH_CACHE_TTL", 300))
     auth_cache_ttl: int = field(default_factory=lambda: _env_int("GATEWAY_AUTH_CACHE_TTL", 60))
 
+    # --- Import -----------------------------------------------------------
+    # preserve = die Ordner-/Dateistruktur uebernehmen, die Deemix anhand der
+    #            eigenen Templates erzeugt hat. Standard, weil damit die neuen
+    #            Dateien exakt so liegen wie der bestehende Bestand.
+    # tags     = Zielpfad selbst aus den Tags ableiten (Interpret/Album/NN - Titel)
+    import_layout: str = field(default_factory=lambda: _env("GATEWAY_IMPORT_LAYOUT", "preserve").lower())
+    # Begleitdateien, die Deemix neben den Track legt (Lyrics, Cover).
+    sidecar_extensions: tuple[str, ...] = (
+        ".lrc", ".txt", ".jpg", ".jpeg", ".png", ".webp", ".nfo",
+    )
+
+    # --- Schutzschalter fuer den Bestand ----------------------------------
+    # Beide standardmaessig AUS. Der Import legt nur neue Dateien an; alles,
+    # was vorhandene Dateien anfasst, muss ausdruecklich freigeschaltet werden.
+    allow_dedupe_apply: bool = field(default_factory=lambda: _env_bool("GATEWAY_ALLOW_DEDUPE_APPLY", False))
+    allow_tag_write: bool = field(default_factory=lambda: _env_bool("GATEWAY_ALLOW_TAG_WRITE", False))
+
     # --- Worker -----------------------------------------------------------
     worker_concurrency: int = field(default_factory=lambda: _env_int("GATEWAY_WORKER_CONCURRENCY", 2))
     download_timeout: int = field(default_factory=lambda: _env_int("GATEWAY_DOWNLOAD_TIMEOUT", 600))

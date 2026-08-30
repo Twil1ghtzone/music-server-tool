@@ -34,6 +34,9 @@ x-gateway-env: &gateway-env
   GATEWAY_STREAM_MODE: ${GATEWAY_STREAM_MODE:-defer}
   GATEWAY_MARKER_SUFFIX: ${GATEWAY_MARKER_SUFFIX:- [Nicht heruntergeladen]}
   GATEWAY_WORKER_CONCURRENCY: ${GATEWAY_WORKER_CONCURRENCY:-2}
+  GATEWAY_IMPORT_LAYOUT: ${GATEWAY_IMPORT_LAYOUT:-preserve}
+  GATEWAY_ALLOW_DEDUPE_APPLY: ${GATEWAY_ALLOW_DEDUPE_APPLY:-false}
+  GATEWAY_ALLOW_TAG_WRITE: ${GATEWAY_ALLOW_TAG_WRITE:-false}
 
 services:
   # -------------------------------------------------------------------------
@@ -41,12 +44,16 @@ services:
     <<: *common
     image: deluan/navidrome:latest
     container_name: navidrome
-    user: "${PUID:-1000}:${PGID:-1000}"
+    # 0:0 wie im bisherigen Setup. NICHT unbedacht auf PUID/PGID aendern:
+    # ./data/navidrome wurde als root angelegt, ein anderer Benutzer kann die
+    # bestehende navidrome.db dann nicht mehr schreiben. Zum Umstellen erst
+    #   chown -R 1000:1000 ./data/navidrome
+    user: "0:0"
     ports:
       - "${NAVIDROME_PORT:-4533}:4533"
     environment:
       TZ: ${TZ:-Europe/Berlin}
-      ND_SCANSCHEDULE: 24h          # Watcher uebernimmt, Full-Scan nur als Netz
+      ND_SCANSCHEDULE: 1h           # wie bisher; der Watcher ist der schnelle Weg
       ND_MONITORCHANGES: "true"     # Live-Watcher: neue Dateien sofort sichtbar
       ND_LOGLEVEL: ${LOG_LEVEL:-info}
       ND_SESSIONTIMEOUT: 24h
@@ -80,6 +87,9 @@ services:
     volumes:
       - ./config/deemix:/config
       # Deemix laedt in die Staging-Ablage, NICHT direkt in die Library.
+      # In Deemix bleibt der Download Path unveraendert auf /downloads - nur
+      # das Ziel dahinter wechselt. Templates und ARL muessen nicht angefasst
+      # werden; der Gateway uebernimmt die erzeugte Struktur unveraendert.
       - ${STAGING_DIR:-/mnt/tank/music-staging}:/downloads
     ports:
       # Nur zur Fehlersuche noetig. Im Normalbetrieb auskommentieren:

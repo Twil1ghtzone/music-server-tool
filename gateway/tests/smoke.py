@@ -103,6 +103,23 @@ with TestClient(app) as client:
     check("Unbekannte virtuelle ID -> Fehlercode 70",
           unknown.json()["subsonic-response"]["error"]["code"] == 70)
 
+    # Schutzschalter: nichts darf den vorhandenen Bestand anfassen.
+    blocked = client.post("/api/library/dupes/apply", json={"groups": [1]}, headers=headers)
+    check("Dedup-Anwenden ist gesperrt", blocked.status_code == 403, blocked.text[:100])
+    blocked = client.patch("/api/library/files/1/tags", json={"title": "x"}, headers=headers)
+    check("Tag-Schreiben ist gesperrt", blocked.status_code == 403, blocked.text[:100])
+
+    report = client.get("/api/preflight")
+    check("Preflight antwortet", report.status_code == 200, report.text[:100])
+    if report.status_code == 200:
+        names = {c["name"] for c in report.json()["checks"]}
+        check("Preflight prueft Staging-Trennung", "Staging getrennt" in names)
+        staging_check = next(
+            c for c in report.json()["checks"] if c["name"] == "Staging getrennt"
+        )
+        check("Staging liegt ausserhalb der Bibliothek", staging_check["status"] == "ok",
+              staging_check["detail"])
+
 # ---------------------------------------------------------------- Einheiten
 check("ID-Format", ids.make("dz", "123") == "mgv-dz-123")
 check("ID erkennen", ids.is_virtual("mgv-dz-123") and not ids.is_virtual("abc123"))
@@ -126,6 +143,28 @@ check("Marker zeigt Zustand",
       .endswith("[Wird geladen]"))
 
 check("Pfad-Bereinigung", downloader.safe_component("AC/DC: Back?") == "AC_DC_ Back_")
+
+# preserve: die von Deemix erzeugte Struktur muss unveraendert uebernommen
+# werden, sonst weicht der Neuzugang vom bestehenden Bestand ab.
+staged = BASE / "staging" / "Mark Forster" / "01 - Choere.mp3"
+planned = downloader.plan_destination(staged, {"artist": "Egal", "title": "Egal"})
+check("Import preserve: Struktur bleibt erhalten",
+      planned == BASE / "music" / "Mark Forster" / "01 - Choere.mp3", str(planned))
+
+flat = BASE / "staging" / "Mark Forster - Choere.mp3"
+check("Import preserve: flache Ablage bleibt flach",
+      downloader.plan_destination(flat, {}) == BASE / "music" / "Mark Forster - Choere.mp3")
+
+# Begleitdateien: Navidrome ist per ND_LYRICSPRIORITY auf .lrc angewiesen.
+staged.parent.mkdir(parents=True, exist_ok=True)
+staged.write_bytes(b"audio")
+staged.with_suffix(".lrc").write_text("[00:00.00] Text", encoding="utf-8")
+(staged.parent / "cover.jpg").write_bytes(b"jpg")
+moved_to = downloader.move_into_library(staged, planned)
+carried = downloader.move_sidecars(staged, moved_to)
+check("Lyrics werden mitgenommen", moved_to.with_suffix(".lrc").exists())
+check("Cover wird mitgenommen", (moved_to.parent / "cover.jpg").exists(),
+      str([p.name for p in carried]))
 
 flac = {"ext": ".flac", "bitrate": 900000, "sample_rate": 44100, "title": "t", "artist": "a",
         "album": "b", "album_artist": "c", "year": 2001, "track_no": 1, "has_cover": 1,

@@ -15,6 +15,7 @@ Meldung fehl und der Downloader faellt auf die Ordner-Ueberwachung zurueck
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -109,23 +110,27 @@ async def add_to_queue(url: str, bitrate: str) -> str:
 
 
 async def probe() -> dict[str, Any]:
-    """Fuer die Diagnose-Seite: was antwortet der Deemix-Container ueberhaupt?"""
-    results: list[dict[str, Any]] = []
-    reachable = False
-    for path in _INFO_CANDIDATES:
+    """Fuer die Diagnose-Seite: was antwortet der Deemix-Container ueberhaupt?
+
+    Alle Kandidaten parallel. Sequenziell waere jede nicht erreichbare Adresse
+    ein voller Verbindungs-Timeout - bei sechs Kandidaten wartet der Nutzer
+    dann eine halbe Minute auf eine Seite, die nur Status anzeigt.
+    """
+
+    async def one(path: str) -> dict[str, Any]:
         try:
-            resp = await http.deemix().get(path, timeout=5.0)
-            reachable = True
-            results.append(
-                {
-                    "path": path,
-                    "status": resp.status_code,
-                    "content_type": resp.headers.get("content-type", ""),
-                    "preview": (resp.text or "")[:160],
-                }
-            )
+            resp = await http.deemix().get(path, timeout=3.0)
+            return {
+                "path": path,
+                "status": resp.status_code,
+                "content_type": resp.headers.get("content-type", ""),
+                "preview": (resp.text or "")[:160],
+            }
         except Exception as exc:
-            results.append({"path": path, "status": None, "error": str(exc)[:160]})
+            return {"path": path, "status": None, "error": str(exc)[:160]}
+
+    results = list(await asyncio.gather(*(one(path) for path in _INFO_CANDIDATES)))
+    reachable = any(item.get("status") is not None for item in results)
     stored = await db.get_setting(SETTING_KEY)
     return {
         "reachable": reachable,

@@ -257,6 +257,14 @@ async def _find_acoustic(job_id: int) -> int:
 # ------------------------------------------------------------- Anwenden
 async def handle_apply(job: dict[str, Any]) -> str:
     """Verschiebt die Nicht-Keeper einer Gruppe in die Quarantaene."""
+    if not settings.allow_dedupe_apply:
+        # Schutzschalter fuer den ersten Betrieb: suchen und anzeigen ja,
+        # anfassen nein. Erst freischalten, wenn die Vorschlaege geprueft sind.
+        raise RuntimeError(
+            "Bereinigung ist gesperrt. Zum Freischalten "
+            "GATEWAY_ALLOW_DEDUPE_APPLY=true setzen und den Worker neu starten."
+        )
+
     payload = job["payload"]
     group_ids: list[int] = [int(g) for g in payload.get("groups") or []]
     if not group_ids:

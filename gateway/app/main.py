@@ -19,6 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import preflight
 from .api import auth as auth_api
 from .api import dashboard as dashboard_api
 from .api import library as library_api
@@ -61,11 +62,8 @@ async def lifespan(app: FastAPI):
     log.info("  Musik     : %s", settings.music_dir)
     log.info("  Staging   : %s", settings.staging_dir)
     log.info("  Stream-Modus: %s", settings.stream_mode)
-    if not settings.navidrome_password:
-        log.warning(
-            "NAVIDROME_PASSWORD ist leer - Scan-Trigger und ID-Aufloesung "
-            "werden nicht funktionieren."
-        )
+    log.info("  Import-Layout: %s", settings.import_layout)
+    await preflight.log_summary()
     await emit("Gateway gestartet", category="system")
 
     try:

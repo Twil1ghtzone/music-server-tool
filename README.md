@@ -81,6 +81,69 @@ Dann:
 > Benutzername und Passwort bleiben die aus Navidrome — der Gateway prüft sie
 > dort und speichert selbst kein Subsonic-Passwort.
 
+---
+
+## Umstieg von einem laufenden Setup
+
+Wer Navidrome und Deemix schon betreibt, ändert genau eine Sache: **Deemix lädt
+nicht mehr direkt in die Bibliothek, sondern in einen Staging-Ordner.**
+
+In Deemix selbst muss nichts angepasst werden. Der *Download Path* bleibt
+`/downloads`, Trackname- und Album-Templates bleiben, wie sie sind — nur das
+Volume dahinter zeigt jetzt auf `STAGING_DIR` statt auf die Bibliothek. Der
+Gateway übernimmt die Ordner- und Dateistruktur, die Deemix daraus erzeugt,
+unverändert (`GATEWAY_IMPORT_LAYOUT=preserve`). Neue Titel liegen damit exakt
+so wie der bestehende Bestand, der ja von denselben Templates stammt.
+
+### Schritte
+
+1. Zwei Datasets anlegen, **außerhalb** der Bibliothek:
+   `/mnt/tank/music-staging` und `/mnt/tank/music-quarantine`.
+   Liegen sie innerhalb von `/mnt/tank/music`, würde Navidrome halbfertige
+   Downloads indexieren — die Startprüfung bricht deshalb mit einem Fehler ab.
+2. `.env` anlegen und füllen.
+3. `docker compose up -d --build`
+4. Dashboard öffnen → **Diagnose**. Die Startprüfung muss ohne rote Einträge
+   durchlaufen, bevor der erste Titel angefordert wird.
+5. **Bibliothek → Neu indexieren.** Reiner Lesevorgang, verändert keine Datei.
+6. Erst danach im Client einen Titel suchen, den es lokal nicht gibt.
+
+### Was am bestehenden Bestand verändert wird
+
+| Funktion | Standard | Wirkung auf vorhandene Dateien |
+|---|---|---|
+| Just-in-Time-Download | aktiv | legt **nur neue** Dateien an |
+| Bibliotheks-Index | auf Knopfdruck | nur lesend |
+| Duplikatsuche | auf Knopfdruck | nur lesend, erzeugt Vorschläge |
+| Duplikate anwenden | **gesperrt** | verschiebt in Quarantäne — erst nach `GATEWAY_ALLOW_DEDUPE_APPLY=true` |
+| Tags schreiben | **gesperrt** | überschreibt Tags — erst nach `GATEWAY_ALLOW_TAG_WRITE=true` |
+
+Beide Schalter stehen bewusst auf `false`. Solange sie aus sind, kann der
+Gateway keine vorhandene Datei anfassen — auch nicht durch einen Fehlklick.
+Erst die Duplikatvorschläge im Dashboard prüfen, dann freischalten.
+
+### Navidrome bleibt, wie es war
+
+`docker-compose.yml` startet Navidrome weiterhin als `user: "0:0"`. Das ist
+Absicht: `./data/navidrome` wurde als root angelegt, und ein Wechsel auf
+`1000:1000` würde die bestehende `navidrome.db` unbeschreibbar machen. Wer
+umstellen will, macht vorher
+
+```bash
+docker compose stop navidrome && chown -R 1000:1000 ./data/navidrome
+```
+
+Die Bibliothek ist für Navidrome unverändert read-only eingehängt.
+
+### Songtexte
+
+Bei `ND_LYRICSPRIORITY: .lrc,embedded,.txt` schreibt Deemix `.lrc`-Dateien
+neben den Track. Der Import nimmt sie mit — ebenso `cover.jpg` und
+`folder.jpg`. Ein vorhandenes Cover in der Bibliothek wird dabei nie
+überschrieben.
+
+---
+
 ### Reihenfolge bei der Ersteinrichtung
 
 1. `docker compose up -d navidrome` — Navidrome starten, im Browser den
@@ -107,6 +170,9 @@ Schalter, die das Verhalten wirklich ändern:
 | `GATEWAY_PROVIDER_SEARCH` | `false` schaltet die Katalogsuche komplett ab |
 | `GATEWAY_WORKER_CONCURRENCY` | Parallele Jobs im Worker |
 | `DEEMIX_BITRATE` | `1` = MP3 128, `3` = MP3 320, `9` = FLAC |
+| `GATEWAY_IMPORT_LAYOUT` | `preserve` (Deemix-Struktur übernehmen) oder `tags` |
+| `GATEWAY_ALLOW_DEDUPE_APPLY` | Duplikate in Quarantäne verschieben dürfen |
+| `GATEWAY_ALLOW_TAG_WRITE` | Tags vorhandener Dateien überschreiben dürfen |
 
 ### `defer` gegen `stream`
 
@@ -272,6 +338,15 @@ Reverse-Proxy mit TLS davor und `GATEWAY_SECURE_COOKIES=true` gesetzt.
 Fingerprints, Duplikatgruppen) und `./data/navidrome/navidrome.db`
 (Wiedergabezähler, Playlists, Bewertungen). Beide bei gestoppten Containern
 kopieren oder `sqlite3 … ".backup"` verwenden.
+
+**Startprüfung.** *Diagnose* im Dashboard prüft Pfade, Rechte, Trennung von
+Staging und Bibliothek, ob Import-Moves atomar sind, und ob Navidrome, Deezer,
+Deemix, ffmpeg, ffprobe und fpcalc erreichbar sind. Dieselben Prüfungen
+schreibt der API-Container beim Start ins Log:
+
+```bash
+docker compose logs gateway-api | grep PRUEFUNG
+```
 
 **Wenn Downloads nicht ankommen.** *Diagnose* im Dashboard zeigt, welche
 Deemix-Endpunkte antworten. Häufigste Ursache ist ein abgelaufener ARL;
