@@ -118,6 +118,19 @@ with TestClient(app) as client:
     check("Navidrome-Scan ohne Zugangsdaten -> 409", blocked.status_code == 409,
           blocked.text[:110])
 
+    # Eintraege aus der Warteschlange entfernen - aber nie ein Mapping,
+    # das ein Client in einer Playlist stehen haben koennte.
+    client.post("/api/download", json={"provider_id": "1109731"}, headers=headers)
+    vorher = len(client.get("/api/queue").json()["items"])
+    geloescht = client.delete("/api/queue/mgv-dz-1109731", headers=headers)
+    nachher = len(client.get("/api/queue").json()["items"])
+    check("Eintrag laesst sich entfernen",
+          geloescht.status_code == 200 and nachher == vorher - 1,
+          f"{vorher} -> {nachher}")
+
+    clear = client.post("/api/queue/clear-failed", headers=headers)
+    check("Fehlgeschlagene aufraeumen antwortet", clear.status_code == 200, clear.text[:80])
+
     info = client.get("/api/navidrome/credentials")
     check("Zugangs-Status abfragbar",
           info.status_code == 200 and info.json()["configured"] is False, info.text[:110])
@@ -237,13 +250,29 @@ async def _orphan_case() -> tuple[str, int]:
     row = await _dbmod.db.fetch_one(
         "SELECT state FROM virtual_track WHERE id = 'mgv-dz-777'"
     )
+
+    # Ein importierter Titel traegt ein Mapping, das Clients in Playlists
+    # stehen haben koennen - der darf nicht entfernbar sein.
+    await _dbmod.db.execute(
+        "INSERT INTO virtual_track(id, provider, provider_id, title, state, navidrome_id) "
+        "VALUES ('mgv-dz-888', 'dz', '888', 'Fertig', 'ready', 'nd-real-1')"
+    )
+    geschuetzt = False
+    try:
+        await downloader.forget_track("mgv-dz-888")
+    except ValueError:
+        geschuetzt = True
+    noch_da = await _dbmod.db.fetch_one(
+        "SELECT navidrome_id FROM virtual_track WHERE id = 'mgv-dz-888'"
+    )
     await _dbmod.db.close()
-    return row["state"], geloest
+    return row["state"], geloest, geschuetzt, bool(noch_da)
 
 
-_state, _resolved = asyncio.run(_orphan_case())
+_state, _resolved, _protected, _still_there = asyncio.run(_orphan_case())
 check("Haengender Titel wird beim Start geloest", _state == "failed" and _resolved == 1,
       f"{_state}, {_resolved} betroffen")
+check("Importierter Titel ist vor dem Entfernen geschuetzt", _protected and _still_there)
 
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
 check("NoCredentials ist ein permanenter Fehler",

@@ -320,6 +320,7 @@ function renderQueue(items) {
         <span class="pill ${STATE_PILL[item.state] ?? ''}">${esc(item.state)}</span>
         ${item.state === 'failed' && item.provider_id
           ? `<button class="tiny" data-download="${esc(item.provider_id)}">Erneut</button>` : ''}
+        <button class="tiny ghost" data-forget="${esc(item.id)}" title="Aus der Liste entfernen">✕</button>
       </div>
     </div>`).join('');
 }
@@ -328,6 +329,19 @@ async function loadQueue() {
   const data = await api('/api/queue?limit=200');
   renderQueue(data.items);
 }
+
+$('#queue-list').addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-forget]');
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api(`/api/queue/${encodeURIComponent(button.dataset.forget)}`, { method: 'DELETE' });
+    button.closest('.item').remove();
+  } catch (exc) {
+    button.disabled = false;
+    toast(exc.message, 'err');
+  }
+});
 
 // ----------------------------------------------------------------- Suche
 $('#search-form').addEventListener('submit', async (event) => {
@@ -765,9 +779,15 @@ const ACTIONS = {
   'scan-library': () => api('/api/library/scan', { method: 'POST' }),
   'fingerprint': () => api('/api/library/fingerprint', { method: 'POST' }),
   'import-staging': () => api('/api/import-staging', { method: 'POST' }),
+  // Aktionen dürfen eine eigene Rückmeldung liefern; sonst gilt die Vorgabe.
+  'clear-failed': async () => {
+    const result = await api('/api/queue/clear-failed', { method: 'POST' });
+    await loadQueue();
+    return `${result.removed} Eintrag/Einträge entfernt`;
+  },
   'find-dupes': () => api('/api/library/dupes/find', { method: 'POST' }),
   'find-dupes-acoustic': () => api('/api/library/dupes/find?acoustic=true', { method: 'POST' }),
-  'diagnostics': () => loadDiagnostics(),
+  'diagnostics': async () => { await loadDiagnostics(); return 'Diagnose aktualisiert'; },
 };
 
 document.addEventListener('click', async (event) => {
@@ -777,8 +797,8 @@ document.addEventListener('click', async (event) => {
   if (!action) return;
   button.disabled = true;
   try {
-    await action();
-    toast('Auftrag eingeplant', 'ok');
+    const message = await action();
+    toast(typeof message === 'string' ? message : 'Auftrag eingeplant', 'ok');
   } catch (exc) {
     toast(exc.message, 'err');
   } finally {

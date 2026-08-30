@@ -459,6 +459,53 @@ async def reset_orphaned_states() -> int:
     )
 
 
+async def forget_track(virtual_id: str) -> None:
+    """Einen Eintrag aus der Warteschlange werfen.
+
+    Zur sonst geltenden Regel "virtuelle IDs werden nie geloescht": die gilt
+    fuer aufgeloeste Titel, deren ID ein Client in einer Playlist stehen haben
+    koennte. Ein Eintrag ohne navidrome_id wurde nie erfolgreich ausgeliefert,
+    und seine ID ist ohnehin aus der Provider-ID ableitbar - taucht der Titel
+    wieder in einer Suche auf, entsteht exakt dieselbe ID erneut. Loeschen ist
+    hier also folgenlos.
+    """
+    row = await ids.load(virtual_id)
+    if not row:
+        return
+    if row.get("navidrome_id"):
+        raise ValueError(
+            "Dieser Titel ist bereits importiert. Sein Mapping wird gebraucht, "
+            "damit gespeicherte Playlists auf den Geraeten gueltig bleiben."
+        )
+    # Einen laufenden Job nicht anfassen - der raeumt selbst auf, wenn er
+    # seinen Titel nicht mehr findet.
+    await db.execute(
+        "DELETE FROM job WHERE dedupe_key = ? AND state != 'running'", (f"dl:{virtual_id}",)
+    )
+    await db.execute(
+        "DELETE FROM virtual_track WHERE id = ? AND navidrome_id IS NULL", (virtual_id,)
+    )
+    await emit(f"Aus der Warteschlange entfernt: {row.get('artist')} - {row.get('title')}",
+               category="download")
+
+
+async def forget_failed() -> int:
+    """Alle fehlgeschlagenen Eintraege auf einmal entfernen."""
+    rows = await db.fetch_all(
+        "SELECT id FROM virtual_track WHERE state = 'failed' AND navidrome_id IS NULL"
+    )
+    for row in rows:
+        await db.execute(
+            "DELETE FROM job WHERE dedupe_key = ? AND state != 'running'", (f"dl:{row['id']}",)
+        )
+    await db.execute(
+        "DELETE FROM virtual_track WHERE state = 'failed' AND navidrome_id IS NULL"
+    )
+    if rows:
+        await emit(f"{len(rows)} fehlgeschlagene Eintraege entfernt", category="download")
+    return len(rows)
+
+
 async def queue_overview(limit: int = 50) -> list[dict]:
     return await db.fetch_all(
         "SELECT id, provider_id, title, artist, album, state, error, "

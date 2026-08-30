@@ -163,6 +163,22 @@ async def queue(user: dict = Depends(security.current_user), limit: int = 100) -
     return {"items": await downloader.queue_overview(limit)}
 
 
+@router.delete("/queue/{virtual_id}")
+async def forget_queue_entry(
+    virtual_id: str, user: dict = Depends(security.guarded)
+) -> dict:
+    try:
+        await downloader.forget_track(virtual_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return {"ok": True}
+
+
+@router.post("/queue/clear-failed")
+async def clear_failed_queue(user: dict = Depends(security.guarded)) -> dict:
+    return {"removed": await downloader.forget_failed()}
+
+
 @router.get("/search")
 async def search(
     user: dict = Depends(security.current_user),
