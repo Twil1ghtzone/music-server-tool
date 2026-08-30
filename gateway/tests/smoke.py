@@ -1,0 +1,156 @@
+"""Rauchtest ohne laufende Nachbarn.
+
+Startet den Gateway in einem Wegwerf-Verzeichnis, mit absichtlich toten
+Adressen fuer Navidrome und Deemix, und prueft: antwortet alles, greift CSRF,
+stimmt die Subsonic-Serialisierung, verhaelt sich die Duplikat-Logik richtig.
+
+    cd gateway && python tests/smoke.py
+
+Erwartung: kein 500, keine Ausnahme, Navidrome sauber als offline erkannt.
+"""
+from __future__ import annotations
+
+import os
+import random
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+BASE = Path(tempfile.mkdtemp(prefix="mst-smoke-"))
+for name in ("music", "staging", "quarantine", "data", "cache"):
+    (BASE / name).mkdir()
+
+os.environ.update(
+    GATEWAY_ROLE="api",
+    LOG_LEVEL="warning",
+    DB_PATH=str(BASE / "data" / "gateway.db"),
+    CACHE_DIR=str(BASE / "cache"),
+    MUSIC_DIR=str(BASE / "music"),
+    STAGING_DIR=str(BASE / "staging"),
+    QUARANTINE_DIR=str(BASE / "quarantine"),
+    # Absichtlich tote Ports: der Test darf keine Nachbarn brauchen.
+    NAVIDROME_URL="http://127.0.0.1:59991",
+    DEEMIX_URL="http://127.0.0.1:59992",
+    NAVIDROME_PASSWORD="x",
+    GATEWAY_ADMIN_USER="admin",
+    GATEWAY_ADMIN_PASSWORD="supersecret123",
+    GATEWAY_SESSION_SECRET="0" * 64,
+    GATEWAY_PROVIDER_SEARCH="false",
+)
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
+from app.services import dedupe, downloader  # noqa: E402
+from app.subsonic import ids, payload  # noqa: E402
+
+failures: list[str] = []
+
+
+def check(label: str, condition: bool, extra: str = "") -> None:
+    print(f"{'OK  ' if condition else 'FAIL'} {label} {extra}")
+    if not condition:
+        failures.append(label)
+
+
+# ------------------------------------------------------------------- HTTP
+with TestClient(app) as client:
+    check("healthz", client.get("/healthz").text == "ok")
+    check("readyz", client.get("/readyz").json()["ready"] is True)
+    check("me ohne Session -> 401", client.get("/api/auth/me").status_code == 401)
+
+    bad = client.post("/api/auth/login", json={"username": "admin", "password": "falsch"})
+    check("Login mit falschem Passwort -> 401", bad.status_code == 401)
+
+    login = client.post(
+        "/api/auth/login", json={"username": "admin", "password": "supersecret123"}
+    )
+    check("Login", login.status_code == 200, login.text[:120])
+    headers = {"X-CSRF-Token": login.json()["csrf"]} if login.status_code == 200 else {}
+
+    check("me mit Session", client.get("/api/auth/me").json().get("username") == "admin")
+
+    status = client.get("/api/status")
+    check("status", status.status_code == 200, status.text[:120])
+    if status.status_code == 200:
+        check("status: Navidrome offline erkannt",
+              status.json()["navidrome"]["online"] is False)
+
+    check("library/stats", client.get("/api/library/stats").status_code == 200)
+    check("library/dupes leer", client.get("/api/library/dupes").json()["groups"] == [])
+    check("library/issues", client.get("/api/library/issues").status_code == 200)
+    check("jobs", client.get("/api/jobs").status_code == 200)
+    check("diagnostics", client.get("/api/diagnostics").status_code == 200)
+
+    check("Scan ohne CSRF-Header -> 403",
+          client.post("/api/library/scan").status_code == 403)
+    first = client.post("/api/library/scan", headers=headers)
+    check("Scan mit CSRF-Header", first.status_code == 200, first.text[:120])
+    second = client.post("/api/library/scan", headers=headers)
+    check("Scan wird dedupliziert", second.json()["job"] == first.json()["job"])
+
+    # Navidrome ist tot -> der Proxy muss trotzdem gueltiges Subsonic liefern.
+    ping = client.get("/rest/ping.view", params={"u": "a", "p": "b", "c": "t"})
+    check("Proxy ohne Navidrome -> gueltige Fehlerantwort",
+          ping.status_code == 200 and "subsonic-response" in ping.text)
+
+    unknown = client.get(
+        "/rest/getSong.view", params={"id": "mgv-dz-999", "u": "a", "p": "b", "c": "t", "f": "json"}
+    )
+    check("Unbekannte virtuelle ID -> Fehlercode 70",
+          unknown.json()["subsonic-response"]["error"]["code"] == 70)
+
+# ---------------------------------------------------------------- Einheiten
+check("ID-Format", ids.make("dz", "123") == "mgv-dz-123")
+check("ID erkennen", ids.is_virtual("mgv-dz-123") and not ids.is_virtual("abc123"))
+check("ID parsen", ids.parse("mgv-dz-123") == ("dz", "123"))
+
+xml = payload.to_xml(
+    payload.envelope({"song": {"id": "x", "title": 'A & B "C"', "isDir": False}})
+).decode()
+check("XML: Escaping", """'A &amp; B "C"'""" in xml, xml[-90:])
+check("XML: bool wird true/false", 'isDir="false"' in xml)
+check("XML: Namensraum", 'xmlns="http://subsonic.org/restapi"' in xml)
+
+song = payload.virtual_song(
+    {"id": "mgv-dz-1", "title": "Choere", "artist": "Mark Forster", "album": "Tape",
+     "duration": 200, "state": "virtual", "created_at": "2026-01-01T00:00:00.000Z"},
+    " [Nicht heruntergeladen]",
+)
+check("Marker im Titel", song["title"].endswith("[Nicht heruntergeladen]"))
+check("Marker zeigt Zustand",
+      payload.virtual_song({**song, "title": "X", "state": "downloading"}, " [x]")["title"]
+      .endswith("[Wird geladen]"))
+
+check("Pfad-Bereinigung", downloader.safe_component("AC/DC: Back?") == "AC_DC_ Back_")
+
+flac = {"ext": ".flac", "bitrate": 900000, "sample_rate": 44100, "title": "t", "artist": "a",
+        "album": "b", "album_artist": "c", "year": 2001, "track_no": 1, "has_cover": 1,
+        "duration": 200, "path": "/music/a/b/t.flac", "size": 30_000_000}
+mp3 = {**flac, "ext": ".mp3", "bitrate": 128000, "path": "/music/a/b/t (1) copy.mp3",
+       "size": 3_000_000}
+check("Keeper: FLAC schlaegt MP3-Kopie", dedupe.keeper_score(flac) > dedupe.keeper_score(mp3),
+      f"{dedupe.keeper_score(flac)} > {dedupe.keeper_score(mp3)}")
+
+random.seed(1)
+a = [random.getrandbits(32) for _ in range(200)]
+check("Fingerprint: identisch -> 1.0", dedupe.similarity(a, a) == 1.0)
+check("Fingerprint: Versatz toleriert", dedupe.similarity(a, a[7:]) > 0.99)
+noisy = [x ^ (1 << random.randrange(32)) for x in a]
+check("Fingerprint: leichtes Rauschen bleibt ueber der Schwelle",
+      dedupe.similarity(a, noisy) >= dedupe.ACOUSTIC_MATCH_THRESHOLD,
+      str(dedupe.similarity(a, noisy)))
+# Unkorrelierte Fingerprints liegen bei ~0.5 (50 % Bitfehler), nicht bei 0.
+other = [random.getrandbits(32) for _ in range(200)]
+check("Fingerprint: fremder Titel unter der Schwelle",
+      dedupe.similarity(a, other) < dedupe.ACOUSTIC_MATCH_THRESHOLD,
+      str(dedupe.similarity(a, other)))
+
+print()
+if failures:
+    print(f"{len(failures)} Test(s) fehlgeschlagen: {failures}")
+    sys.exit(1)
+print("Alle Rauchtests bestanden.")

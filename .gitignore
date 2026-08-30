@@ -1,0 +1,28 @@
+# Runtime data
+data/
+config/
+staging/
+quarantine/
+secrets/
+*.db
+*.db-wal
+*.db-shm
+
+# Env
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

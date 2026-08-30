@@ -1,0 +1,15 @@
+# Der Stack laeuft unter Linux. CRLF wuerde die Shebang in
+# docker-entrypoint.sh zerstoeren, deshalb ueberall LF erzwingen.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yml  text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
+*.html text eol=lf
+Dockerfile text eol=lf
+
+*.png binary
+*.jpg binary
+*.mp3 binary

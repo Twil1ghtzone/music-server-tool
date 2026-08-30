@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>music-server-tool</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎵</text></svg>">
+</head>
+<body>
+
+<!-- ------------------------------------------------------------- Login -->
+<div id="login" class="login-shell" hidden>
+  <form id="login-form" class="card login-card" autocomplete="on">
+    <h1>music-server-tool</h1>
+    <p class="muted">Gateway zwischen Navidrome und Deemix</p>
+    <label>Benutzer
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>Passwort
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <label id="totp-field" hidden>Code der Authenticator-App
+      <input name="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="10">
+    </label>
+    <button type="submit" class="primary">Anmelden</button>
+    <p id="login-error" class="error" hidden></p>
+  </form>
+</div>
+
+<!-- --------------------------------------------------------------- App -->
+<div id="app" class="shell" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <div>
+        <strong>music-server-tool</strong>
+        <small id="brand-status">verbinde…</small>
+      </div>
+    </div>
+    <nav id="nav">
+      <button data-view="overview" class="active">Übersicht</button>
+      <button data-view="search">Suche &amp; Download</button>
+      <button data-view="queue">Warteschlange</button>
+      <button data-view="jobs">Jobs</button>
+      <button data-view="library">Bibliothek</button>
+      <button data-view="dupes">Duplikate</button>
+      <button data-view="tags">Tag-Werkstatt</button>
+      <button data-view="diagnostics">Diagnose</button>
+      <button data-view="account">Konto</button>
+    </nav>
+    <div class="sidebar-foot">
+      <span id="sse-state" class="pill">offline</span>
+      <button id="logout" class="ghost">Abmelden</button>
+    </div>
+  </aside>
+
+  <main>
+    <!-- ---------------------------------------------------- Übersicht -->
+    <section data-view="overview">
+      <header class="page-head">
+        <h2>Übersicht</h2>
+        <div class="actions">
+          <button data-action="scan-navidrome">Navidrome-Scan</button>
+          <button data-action="scan-library">Bibliothek indexieren</button>
+        </div>
+      </header>
+      <div class="tiles" id="tiles"></div>
+      <div class="split">
+        <div class="card">
+          <h3>Aktive Jobs</h3>
+          <div id="overview-jobs" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>Ereignisse</h3>
+          <div id="overview-events" class="log"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Zuletzt hinzugefügt</h3>
+        <div id="recent-albums" class="albums"></div>
+      </div>
+    </section>
+
+    <!-- --------------------------------------------------------- Suche -->
+    <section data-view="search" hidden>
+      <header class="page-head">
+        <h2>Suche &amp; Download</h2>
+      </header>
+      <form id="search-form" class="card row">
+        <input name="q" placeholder="Interpret, Titel oder Album…" required>
+        <button class="primary" type="submit">Suchen</button>
+      </form>
+      <div class="split">
+        <div class="card">
+          <h3>In der Bibliothek</h3>
+          <div id="search-local" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>Im Katalog</h3>
+          <div id="search-catalog" class="list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------- Warteschlange -->
+    <section data-view="queue" hidden>
+      <header class="page-head">
+        <h2>Warteschlange</h2>
+        <div class="actions">
+          <button data-action="import-staging">Staging importieren</button>
+        </div>
+      </header>
+      <div class="card"><div id="queue-list" class="list"></div></div>
+    </section>
+
+    <!-- ---------------------------------------------------------- Jobs -->
+    <section data-view="jobs" hidden>
+      <header class="page-head">
+        <h2>Jobs</h2>
+        <div class="actions">
+          <select id="job-filter">
+            <option value="all">alle</option>
+            <option value="active">aktiv</option>
+            <option value="failed">fehlgeschlagen</option>
+            <option value="done">erledigt</option>
+          </select>
+        </div>
+      </header>
+      <div class="card"><div id="jobs-list" class="list"></div></div>
+    </section>
+
+    <!-- --------------------------------------------------- Bibliothek -->
+    <section data-view="library" hidden>
+      <header class="page-head">
+        <h2>Bibliothek</h2>
+        <div class="actions">
+          <button data-action="scan-library">Neu indexieren</button>
+          <button data-action="fingerprint">Fingerprints berechnen</button>
+        </div>
+      </header>
+      <div class="tiles" id="library-tiles"></div>
+      <div class="split">
+        <div class="card">
+          <h3>Formate</h3>
+          <div id="library-formats" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>Metadaten-Mängel</h3>
+          <div id="library-issues" class="list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------- Duplikate -->
+    <section data-view="dupes" hidden>
+      <header class="page-head">
+        <h2>Duplikate</h2>
+        <div class="actions">
+          <button data-action="find-dupes">Suchen (Hash)</button>
+          <button data-action="find-dupes-acoustic">Suchen (inkl. akustisch)</button>
+          <button id="apply-dupes" class="danger" disabled>Auswahl in Quarantäne</button>
+        </div>
+      </header>
+      <p class="notice">
+        Es wird nichts gelöscht. Nicht behaltene Dateien wandern in den
+        Quarantäne-Ordner und lassen sich von dort zurückholen.
+      </p>
+      <div id="dupes-summary" class="tiles"></div>
+      <div id="dupes-list"></div>
+    </section>
+
+    <!-- ------------------------------------------------ Tag-Werkstatt -->
+    <section data-view="tags" hidden>
+      <header class="page-head">
+        <h2>Tag-Werkstatt</h2>
+      </header>
+      <form id="tag-search" class="card row">
+        <input name="q" placeholder="Suche in Titel, Interpret, Album oder Pfad…">
+        <label class="check"><input type="checkbox" name="issues_only"> nur mit Mängeln</label>
+        <button class="primary" type="submit">Anzeigen</button>
+      </form>
+      <div class="card">
+        <div id="tag-files" class="list"></div>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------ Diagnose -->
+    <section data-view="diagnostics" hidden>
+      <header class="page-head">
+        <h2>Diagnose</h2>
+        <div class="actions"><button data-action="diagnostics">Neu prüfen</button></div>
+      </header>
+      <div id="diagnostics-body"></div>
+    </section>
+
+    <!-- --------------------------------------------------------- Konto -->
+    <section data-view="account" hidden>
+      <header class="page-head"><h2>Konto</h2></header>
+      <div class="split">
+        <form id="password-form" class="card">
+          <h3>Passwort ändern</h3>
+          <label>Aktuelles Passwort<input name="current" type="password" required></label>
+          <label>Neues Passwort (min. 10 Zeichen)
+            <input name="new" type="password" minlength="10" required></label>
+          <button class="primary">Ändern</button>
+        </form>
+        <div class="card">
+          <h3>Zwei-Faktor-Authentifizierung</h3>
+          <p id="totp-state" class="muted"></p>
+          <div id="totp-setup" hidden>
+            <p class="muted">Geheimnis in der Authenticator-App eintragen:</p>
+            <code id="totp-secret" class="secret"></code>
+            <form id="totp-enable-form" class="row">
+              <input name="code" placeholder="6-stelliger Code" inputmode="numeric" required>
+              <button class="primary">Aktivieren</button>
+            </form>
+          </div>
+          <div class="row">
+            <button id="totp-start">Einrichten</button>
+            <button id="totp-off" class="ghost">Deaktivieren</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts" class="toasts"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
