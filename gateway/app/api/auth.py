@@ -76,6 +76,7 @@ async def login(body: LoginBody, request: Request) -> JSONResponse:
     response = JSONResponse(
         {
             "username": user["username"],
+            "role": user["role"],
             "totp_enabled": bool(user["totp_enabled"]),
             "csrf": csrf,
         }
@@ -101,6 +102,7 @@ async def me(request: Request) -> dict:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Nicht angemeldet")
     return {
         "username": user["username"],
+        "role": user["role"],
         "totp_enabled": bool(user["totp_enabled"]),
         "csrf": request.cookies.get(security.CSRF_COOKIE),
     }

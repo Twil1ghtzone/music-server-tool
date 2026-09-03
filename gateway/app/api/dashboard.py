@@ -147,14 +147,14 @@ async def list_jobs(
 
 
 @router.post("/jobs/{job_id}/retry")
-async def retry_job(job_id: int, user: dict = Depends(security.guarded)) -> dict:
+async def retry_job(job_id: int, user: dict = Depends(security.guarded_admin)) -> dict:
     if not await jobs.retry(job_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Job ist nicht wiederholbar")
     return {"ok": True}
 
 
 @router.post("/jobs/{job_id}/cancel")
-async def cancel_job(job_id: int, user: dict = Depends(security.guarded)) -> dict:
+async def cancel_job(job_id: int, user: dict = Depends(security.guarded_admin)) -> dict:
     if not await jobs.cancel(job_id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Job laeuft bereits oder ist beendet")
     return {"ok": True}
@@ -168,7 +168,7 @@ async def queue(user: dict = Depends(security.current_user), limit: int = 100) -
 
 @router.delete("/queue/{virtual_id}")
 async def forget_queue_entry(
-    virtual_id: str, user: dict = Depends(security.guarded)
+    virtual_id: str, user: dict = Depends(security.guarded_admin)
 ) -> dict:
     try:
         await downloader.forget_track(virtual_id)
@@ -178,7 +178,7 @@ async def forget_queue_entry(
 
 
 @router.post("/queue/clear-failed")
-async def clear_failed_queue(user: dict = Depends(security.guarded)) -> dict:
+async def clear_failed_queue(user: dict = Depends(security.guarded_admin)) -> dict:
     return {"removed": await downloader.forget_failed()}
 
 
@@ -230,7 +230,7 @@ async def request_download(
 
 
 @router.post("/scan")
-async def trigger_scan(body: ScanBody, user: dict = Depends(security.guarded)) -> dict:
+async def trigger_scan(body: ScanBody, user: dict = Depends(security.guarded_admin)) -> dict:
     # Ohne Zugangsdaten waere der Job zum Scheitern verurteilt. Lieber hier
     # sagen warum, als drei Fehlermeldungen im Ereignisprotokoll erzeugen.
     if not await navidrome.has_credentials_async():
@@ -251,7 +251,7 @@ async def trigger_scan(body: ScanBody, user: dict = Depends(security.guarded)) -
 
 
 @router.post("/import-staging")
-async def import_staging(user: dict = Depends(security.guarded)) -> dict:
+async def import_staging(user: dict = Depends(security.guarded_admin)) -> dict:
     job_id = await jobs.enqueue(
         jobs.IMPORT_STAGING, priority=jobs.PRIORITY_NORMAL, dedupe_key="import:staging"
     )
@@ -265,13 +265,13 @@ class NavidromeCredentialsBody(BaseModel):
 
 
 @router.get("/navidrome/credentials")
-async def navidrome_credentials(user: dict = Depends(security.current_user)) -> dict:
+async def navidrome_credentials(user: dict = Depends(security.admin_only)) -> dict:
     return await navidrome.credentials_info()
 
 
 @router.post("/navidrome/credentials")
 async def set_navidrome_credentials(
-    body: NavidromeCredentialsBody, user: dict = Depends(security.guarded)
+    body: NavidromeCredentialsBody, user: dict = Depends(security.guarded_admin)
 ) -> dict:
     """Navidrome-Zugang von Hand hinterlegen.
 
@@ -293,14 +293,14 @@ async def set_navidrome_credentials(
 
 
 @router.delete("/navidrome/credentials")
-async def delete_navidrome_credentials(user: dict = Depends(security.guarded)) -> dict:
+async def delete_navidrome_credentials(user: dict = Depends(security.guarded_admin)) -> dict:
     await navidrome.clear_credentials()
     return await navidrome.credentials_info()
 
 
 @router.get("/logs")
 async def logs(
-    user: dict = Depends(security.current_user),
+    user: dict = Depends(security.admin_only),
     level: str = Query("all"),
     category: str = Query("all"),
     q: str = Query("", max_length=200),
@@ -313,7 +313,7 @@ async def logs(
 
 
 @router.get("/client-activity")
-async def client_activity(user: dict = Depends(security.current_user)) -> dict:
+async def client_activity(user: dict = Depends(security.admin_only)) -> dict:
     """Die letzten Zugriffe von Musik-Clients auf den Subsonic-Endpunkt.
 
     Beantwortet ohne Raten, ob ein Client ueberhaupt hier ankommt. Bleibt die
@@ -325,7 +325,7 @@ async def client_activity(user: dict = Depends(security.current_user)) -> dict:
 @router.get("/client-test")
 async def client_test(
     request: Request,
-    user: dict = Depends(security.current_user),
+    user: dict = Depends(security.admin_only),
     q: str = Query("Mark Forster", max_length=200),
 ) -> dict:
     """Fragt den eigenen Subsonic-Endpunkt so ab, wie es ein Musik-Client tut.
@@ -387,12 +387,12 @@ class ArlBody(BaseModel):
 
 
 @router.get("/deemix/arl")
-async def deemix_arl(user: dict = Depends(security.current_user)) -> dict:
+async def deemix_arl(user: dict = Depends(security.admin_only)) -> dict:
     return await deemix.arl_info()
 
 
 @router.post("/deemix/arl")
-async def set_deemix_arl(body: ArlBody, user: dict = Depends(security.guarded)) -> dict:
+async def set_deemix_arl(body: ArlBody, user: dict = Depends(security.guarded_admin)) -> dict:
     """ARL hinterlegen, damit der Gateway sich selbst bei Deemix anmelden kann.
 
     Deemix haelt die Deezer-Sitzung pro HTTP-Sitzung. Dass die Weboberflaeche
@@ -412,19 +412,19 @@ async def set_deemix_arl(body: ArlBody, user: dict = Depends(security.guarded)) 
 
 
 @router.delete("/deemix/arl")
-async def delete_deemix_arl(user: dict = Depends(security.guarded)) -> dict:
+async def delete_deemix_arl(user: dict = Depends(security.guarded_admin)) -> dict:
     await deemix.clear_arl()
     return await deemix.arl_info()
 
 
 @router.get("/preflight")
-async def preflight_report(user: dict = Depends(security.current_user)) -> dict:
+async def preflight_report(user: dict = Depends(security.admin_only)) -> dict:
     """Passt die Konfiguration zum System? Vor dem ersten Download aufrufen."""
     return await preflight.run()
 
 
 @router.get("/diagnostics")
-async def diagnostics(user: dict = Depends(security.current_user)) -> dict:
+async def diagnostics(user: dict = Depends(security.admin_only)) -> dict:
     nd, dz, dx, tools = await asyncio.gather(
         navidrome.server_info(),
         deezer.healthy(),
@@ -457,7 +457,7 @@ class TransportBody(BaseModel):
 
 @router.post("/diagnostics/deemix-transport")
 async def set_deemix_transport(
-    body: TransportBody, user: dict = Depends(security.guarded)
+    body: TransportBody, user: dict = Depends(security.guarded_admin)
 ) -> dict:
     await deemix.set_transport(body.method, body.path, body.style)
     return {"ok": True}

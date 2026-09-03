@@ -55,12 +55,12 @@ def _require_tag_write() -> None:
 
 # ------------------------------------------------------------------ Index
 @router.get("/stats")
-async def stats(user: dict = Depends(security.current_user)) -> dict:
+async def stats(user: dict = Depends(security.admin_only)) -> dict:
     return await scanner.library_stats()
 
 
 @router.post("/scan")
-async def scan(user: dict = Depends(security.guarded)) -> dict:
+async def scan(user: dict = Depends(security.guarded_admin)) -> dict:
     job_id = await jobs.enqueue(
         jobs.LIBRARY_SCAN, priority=jobs.PRIORITY_NORMAL, dedupe_key="scan:library"
     )
@@ -69,7 +69,7 @@ async def scan(user: dict = Depends(security.guarded)) -> dict:
 
 @router.post("/fingerprint")
 async def fingerprint(
-    user: dict = Depends(security.guarded), limit: int = Query(5000, le=100000)
+    user: dict = Depends(security.guarded_admin), limit: int = Query(5000, le=100000)
 ) -> dict:
     job_id = await jobs.enqueue(
         jobs.FINGERPRINT,
@@ -82,7 +82,7 @@ async def fingerprint(
 
 @router.get("/files")
 async def files(
-    user: dict = Depends(security.current_user),
+    user: dict = Depends(security.admin_only),
     q: str = Query("", max_length=200),
     issues_only: bool = False,
     limit: int = Query(100, le=500),
@@ -113,7 +113,7 @@ async def files(
 # -------------------------------------------------------------- Duplikate
 @router.get("/dupes")
 async def list_dupes(
-    user: dict = Depends(security.current_user),
+    user: dict = Depends(security.admin_only),
     state: str = Query("open", pattern="^(open|applied|ignored)$"),
     limit: int = Query(100, le=300),
 ) -> dict:
@@ -122,7 +122,7 @@ async def list_dupes(
 
 @router.post("/dupes/find")
 async def find_dupes(
-    user: dict = Depends(security.guarded), acoustic: bool = False
+    user: dict = Depends(security.guarded_admin), acoustic: bool = False
 ) -> dict:
     job_id = await jobs.enqueue(
         jobs.FIND_DUPES,
@@ -134,7 +134,7 @@ async def find_dupes(
 
 
 @router.post("/dupes/apply")
-async def apply_dupes(body: ApplyBody, user: dict = Depends(security.guarded)) -> dict:
+async def apply_dupes(body: ApplyBody, user: dict = Depends(security.guarded_admin)) -> dict:
     """Verschiebt die Nicht-Keeper in die Quarantaene. Kein Loeschen."""
     if not settings.allow_dedupe_apply:
         raise HTTPException(
@@ -152,7 +152,7 @@ async def apply_dupes(body: ApplyBody, user: dict = Depends(security.guarded)) -
 
 @router.post("/dupes/{group_id}/keeper")
 async def set_keeper(
-    group_id: int, body: KeeperBody, user: dict = Depends(security.guarded)
+    group_id: int, body: KeeperBody, user: dict = Depends(security.guarded_admin)
 ) -> dict:
     member = await db.fetch_one(
         "SELECT 1 FROM dupe_member WHERE group_id = ? AND media_file_id = ?",
@@ -168,13 +168,13 @@ async def set_keeper(
 
 
 @router.post("/dupes/{group_id}/ignore")
-async def ignore_group(group_id: int, user: dict = Depends(security.guarded)) -> dict:
+async def ignore_group(group_id: int, user: dict = Depends(security.guarded_admin)) -> dict:
     await db.execute("UPDATE dupe_group SET state = 'ignored' WHERE id = ?", (group_id,))
     return {"ok": True}
 
 
 @router.post("/dupes/{group_id}/restore")
-async def restore_group(group_id: int, user: dict = Depends(security.guarded)) -> dict:
+async def restore_group(group_id: int, user: dict = Depends(security.guarded_admin)) -> dict:
     restored = await dedupe.restore(group_id)
     await emit(f"{restored} Datei(en) aus der Quarantaene zurueckgeholt", category="dedupe")
     return {"restored": restored}
@@ -183,7 +183,7 @@ async def restore_group(group_id: int, user: dict = Depends(security.guarded)) -
 # ------------------------------------------------------------------ Tags
 @router.patch("/files/{file_id}/tags")
 async def edit_tags(
-    file_id: int, body: TagBody, user: dict = Depends(security.guarded)
+    file_id: int, body: TagBody, user: dict = Depends(security.guarded_admin)
 ) -> dict:
     _require_tag_write()
     row = await db.fetch_one("SELECT * FROM media_file WHERE id = ?", (file_id,))
@@ -209,7 +209,7 @@ async def edit_tags(
 
 
 @router.post("/files/tags/batch")
-async def batch_tags(body: BatchTagBody, user: dict = Depends(security.guarded)) -> dict:
+async def batch_tags(body: BatchTagBody, user: dict = Depends(security.guarded_admin)) -> dict:
     _require_tag_write()
     changes = {k: v for k, v in body.changes.model_dump(exclude_unset=True).items()}
     if not changes:
@@ -257,7 +257,7 @@ async def _refresh_row(file_id: int, path: Path) -> None:
 
 
 @router.get("/issues")
-async def issues(user: dict = Depends(security.current_user)) -> dict:
+async def issues(user: dict = Depends(security.admin_only)) -> dict:
     rows = await db.fetch_all(
         "SELECT tag_issues FROM media_file WHERE missing = 0 AND tag_issues IS NOT NULL"
     )

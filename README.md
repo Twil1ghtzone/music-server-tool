@@ -135,6 +135,33 @@ sieht**: der Test fragt den eigenen Subsonic-Endpunkt genauso ab wie
 Substreamer. Kommen dort Titel mit Marker zurück, liegt ein verbleibendes
 Problem im Client — fast immer zeigt er noch auf 4533.
 
+### Benutzer für das Dashboard
+
+Unter **Benutzer** legst du weitere Dashboard-Konten an. Zwei Rollen:
+
+| Rolle | darf |
+|---|---|
+| **Administrator** | alles — Einstellungen, Zugangsdaten, Bibliothek, Duplikate, Protokoll, Benutzerverwaltung |
+| **Benutzer** | Übersicht, Suche, Titel anfordern, Warteschlange und Jobs ansehen |
+
+Genau das, wofür man Mitbewohnern einen Zugang gibt: sie können sich Musik
+wünschen, aber nichts einstellen und nichts löschen.
+
+Das erste Konto ist immer Administrator, und der letzte Administrator kann
+sich weder selbst entmachten noch löschen — sonst käme niemand mehr an die
+Einstellungen. Ein zurückgesetztes Passwort beendet alle offenen Sitzungen des
+Betroffenen.
+
+Die Navigation blendet aus, was die Rolle nicht darf. Das ist reine
+Aufgeräumtheit: die Endpunkte lehnen es unabhängig davon mit 403 ab, auch bei
+direktem Aufruf.
+
+> **Nicht zu verwechseln:** das sind Konten für das **Web-Dashboard**. Die
+> Musik-Clients melden sich weiterhin mit ihren **Navidrome**-Konten an — der
+> Gateway reicht diese Anmeldung unverändert weiter und legt dafür keine
+> eigenen Benutzer an. Wer nur Musik hören soll, braucht hier also gar kein
+> Konto, sondern eines in Navidrome.
+
 ### Deemix verbinden (Deezer-ARL)
 
 **Dass die Deemix-Oberfläche angemeldet ist, reicht nicht.** Deemix hält die

@@ -44,11 +44,12 @@
       <button data-view="search">Suche &amp; Download</button>
       <button data-view="queue">Warteschlange</button>
       <button data-view="jobs">Jobs</button>
-      <button data-view="library">Bibliothek</button>
-      <button data-view="dupes">Duplikate</button>
-      <button data-view="tags">Tag-Werkstatt</button>
-      <button data-view="logs">Protokoll</button>
-      <button data-view="diagnostics">Diagnose</button>
+      <button data-view="library" data-admin>Bibliothek</button>
+      <button data-view="dupes" data-admin>Duplikate</button>
+      <button data-view="tags" data-admin>Tag-Werkstatt</button>
+      <button data-view="logs" data-admin>Protokoll</button>
+      <button data-view="diagnostics" data-admin>Diagnose</button>
+      <button data-view="users" data-admin>Benutzer</button>
       <button data-view="account">Konto</button>
     </nav>
     <div class="sidebar-foot">
@@ -221,6 +222,36 @@
         <div class="actions"><button data-action="diagnostics">Neu prüfen</button></div>
       </header>
       <div id="diagnostics-body"></div>
+    </section>
+
+    <!-- ------------------------------------------------------ Benutzer -->
+    <section data-view="users" hidden>
+      <header class="page-head">
+        <h2>Benutzer</h2>
+      </header>
+      <p class="notice">Das sind Konten für <strong>dieses Dashboard</strong>.
+        Musik-Clients melden sich weiterhin mit ihren Navidrome-Konten an —
+        daran ändert sich nichts.</p>
+      <div class="split">
+        <form id="user-create" class="card">
+          <h3>Neuen Benutzer anlegen</h3>
+          <label>Benutzername
+            <input name="username" pattern="[A-Za-z0-9._@-]+" required autocomplete="off"></label>
+          <label>Passwort (min. 10 Zeichen)
+            <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+          <label>Rolle
+            <select name="role">
+              <option value="user">Benutzer — suchen und herunterladen</option>
+              <option value="admin">Administrator — darf alles</option>
+            </select>
+          </label>
+          <button class="primary">Anlegen</button>
+        </form>
+        <div class="card">
+          <h3>Vorhandene Benutzer</h3>
+          <div id="user-list" class="list"></div>
+        </div>
+      </div>
     </section>
 
     <!-- --------------------------------------------------------- Konto -->

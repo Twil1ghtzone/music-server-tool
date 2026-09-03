@@ -131,6 +131,75 @@ with TestClient(app) as client:
     clear = client.post("/api/queue/clear-failed", headers=headers)
     check("Fehlgeschlagene aufraeumen antwortet", clear.status_code == 200, clear.text[:80])
 
+    # --- Benutzerverwaltung -----------------------------------------------
+    check("Erstkonto ist Administrator",
+          client.get("/api/auth/me").json().get("role") == "admin")
+
+    angelegt = client.post("/api/users", headers=headers,
+                           json={"username": "mitbewohner", "password": "einlangespasswort",
+                                 "role": "user"})
+    check("Benutzer anlegen", angelegt.status_code == 200, angelegt.text[:90])
+    neue_id = angelegt.json().get("id")
+
+    doppelt = client.post("/api/users", headers=headers,
+                          json={"username": "mitbewohner", "password": "einlangespasswort"})
+    check("Doppelter Benutzername -> 409", doppelt.status_code == 409)
+
+    kurz = client.post("/api/users", headers=headers,
+                       json={"username": "kurz", "password": "zukurz"})
+    check("Zu kurzes Passwort wird abgelehnt", kurz.status_code == 422)
+
+    liste = client.get("/api/users").json()["users"]
+    eigene_id = next(u["id"] for u in liste if u["self"])
+    selbst = client.delete(f"/api/users/{eigene_id}", headers=headers)
+    check("Eigenes Konto ist nicht loeschbar", selbst.status_code == 409, selbst.text[:80])
+
+    check("Benutzerliste zeigt beide", len(liste) == 2, str([u["username"] for u in liste]))
+
+    # Der letzte Administrator darf sich nicht selbst entmachten.
+    admin_id = next(u["id"] for u in liste if u["role"] == "admin")
+    entmachten = client.patch(f"/api/users/{admin_id}", headers=headers, json={"role": "user"})
+    check("Letzter Administrator bleibt Administrator", entmachten.status_code == 409,
+          entmachten.text[:90])
+
+    # --- Was ein normaler Benutzer darf und was nicht ---------------------
+    # Zweite Sitzung OHNE with: die Lifespan laeuft bereits, ein zweiter
+    # Kontextmanager wuerde sie erneut starten und die Datenbank unter der
+    # ersten Sitzung wegziehen.
+    gast = TestClient(app)
+    anmeldung = gast.post("/api/auth/login",
+                          json={"username": "mitbewohner", "password": "einlangespasswort"})
+    check("Neuer Benutzer kann sich anmelden", anmeldung.status_code == 200,
+          anmeldung.text[:90])
+    check("Neuer Benutzer hat die Rolle 'user'",
+          anmeldung.json().get("role") == "user", anmeldung.text[:70])
+    gast_headers = {"X-CSRF-Token": anmeldung.json().get("csrf", "")}
+
+    # Erlaubt: das, wofuer man den Zugang gibt.
+    check("Benutzer darf die Uebersicht sehen", gast.get("/api/status").status_code == 200)
+    check("Benutzer darf die Warteschlange sehen", gast.get("/api/queue").status_code == 200)
+    check("Benutzer darf Jobs sehen", gast.get("/api/jobs").status_code == 200)
+
+    # Verboten: alles, was einstellt, loescht oder Interna zeigt.
+    verboten = {
+        "Protokoll": gast.get("/api/logs"),
+        "Diagnose": gast.get("/api/diagnostics"),
+        "Client-Zugriffe": gast.get("/api/client-activity"),
+        "Navidrome-Zugang": gast.get("/api/navidrome/credentials"),
+        "Deemix-ARL": gast.get("/api/deemix/arl"),
+        "Bibliothek": gast.get("/api/library/stats"),
+        "Duplikate": gast.get("/api/library/dupes"),
+        "Benutzerliste": gast.get("/api/users"),
+        "Bibliotheks-Scan": gast.post("/api/library/scan", headers=gast_headers),
+        "Warteschlange leeren": gast.post("/api/queue/clear-failed", headers=gast_headers),
+        "Benutzer anlegen": gast.post(
+            "/api/users", headers=gast_headers,
+            json={"username": "heimlich", "password": "einlangespasswort"}),
+    }
+    for name, antwort in verboten.items():
+        check(f"Benutzer darf nicht: {name}", antwort.status_code == 403,
+              f"HTTP {antwort.status_code}")
+
     logs = client.get("/api/logs?level=all&limit=50")
     check("Protokoll ist abrufbar",
           logs.status_code == 200 and len(logs.json()["entries"]) > 0,

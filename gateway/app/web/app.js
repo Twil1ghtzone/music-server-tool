@@ -78,6 +78,9 @@ function tile(label, value, sub = '', kind = '') {
           ${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
 }
 
+// Ansichten, die nur Administratoren offenstehen.
+const ADMIN_VIEWS = new Set(['library', 'dupes', 'tags', 'logs', 'diagnostics', 'users']);
+
 const STATE_PILL = {
   pending: '', running: 'running', done: 'ok', failed: 'err', cancelled: '',
   queued: '', downloading: 'running', importing: 'running', ready: 'ok', virtual: '',
@@ -103,7 +106,19 @@ async function showApp(user) {
   state.user = user;
   $('#login').hidden = true;
   $('#app').hidden = false;
-  $('#brand-status').textContent = user.username;
+  $('#brand-status').textContent = user.role === 'admin'
+    ? `${user.username} · Administrator` : user.username;
+
+  // Was ein Benutzer ohnehin nicht darf, wird gar nicht erst angeboten.
+  // Die Endpunkte lehnen es unabhängig davon ab — das hier ist reine
+  // Aufgeräumtheit, kein Sicherheitsmerkmal.
+  const admin = user.role === 'admin';
+  $$('#nav button[data-admin]').forEach((b) => { b.hidden = !admin; });
+  $$('[data-action="scan-navidrome"], [data-action="scan-library"], '
+     + '[data-action="clear-failed"], [data-action="import-staging"]')
+    .forEach((b) => { b.hidden = !admin; });
+
+  if (!admin && ADMIN_VIEWS.has(state.view)) state.view = 'overview';
   connectStream();
   await switchView(state.view);
 }
@@ -149,6 +164,7 @@ async function switchView(view) {
     library: loadLibrary,
     dupes: loadDupes,
     logs: loadLogs,
+    users: loadUsers,
     diagnostics: loadDiagnostics,
     account: loadAccount,
   };
@@ -327,7 +343,9 @@ function renderQueue(items) {
         <span class="pill ${STATE_PILL[item.state] ?? ''}">${esc(item.state)}</span>
         ${item.state === 'failed' && item.provider_id
           ? `<button class="tiny" data-download="${esc(item.provider_id)}">Erneut</button>` : ''}
-        <button class="tiny ghost" data-forget="${esc(item.id)}" title="Aus der Liste entfernen">✕</button>
+        ${state.user?.role === 'admin'
+          ? `<button class="tiny ghost" data-forget="${esc(item.id)}"
+               title="Aus der Liste entfernen">✕</button>` : ''}
       </div>
     </div>`).join('');
 }
@@ -828,6 +846,85 @@ document.addEventListener('click', async (event) => {
               { method: 'DELETE' });
     toast('Entfernt', 'ok');
     await loadDiagnostics();
+  } catch (exc) { toast(exc.message, 'err'); }
+});
+
+// -------------------------------------------------------------- Benutzer
+const ROLLE = { admin: 'Administrator', user: 'Benutzer' };
+
+async function loadUsers() {
+  const { users } = await api('/api/users');
+  $('#user-list').innerHTML = users.map((u) => `
+    <div class="item">
+      <div class="main">
+        <div class="title">${esc(u.username)}${u.self ? ' <span class="muted">(du)</span>' : ''}</div>
+        <div class="sub">seit ${esc((u.created_at || '').slice(0, 10))}
+          · ${u.last_login_at ? 'zuletzt ' + esc(u.last_login_at.slice(0, 16)) : 'nie angemeldet'}
+          · ${u.sessions} offene Sitzung(en)${u.totp_enabled ? ' · 2FA' : ''}</div>
+      </div>
+      <div class="side">
+        <select data-role="${u.id}" ${u.self ? 'disabled' : ''}>
+          <option value="user" ${u.role === 'user' ? 'selected' : ''}>Benutzer</option>
+          <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrator</option>
+        </select>
+        <button class="tiny" data-reset="${u.id}" data-name="${esc(u.username)}">Passwort</button>
+        ${u.self ? '' : `<button class="tiny danger" data-deluser="${u.id}"
+                          data-name="${esc(u.username)}">Löschen</button>`}
+      </div>
+    </div>`).join('');
+}
+
+$('#user-create').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const data = new FormData(event.target);
+  try {
+    await api('/api/users', {
+      method: 'POST',
+      body: {
+        username: data.get('username'),
+        password: data.get('password'),
+        role: data.get('role'),
+      },
+    });
+    event.target.reset();
+    toast('Benutzer angelegt', 'ok');
+    await loadUsers();
+  } catch (exc) { toast(exc.message, 'err'); }
+});
+
+$('#user-list').addEventListener('change', async (event) => {
+  const select = event.target.closest('[data-role]');
+  if (!select) return;
+  try {
+    await api(`/api/users/${select.dataset.role}`, {
+      method: 'PATCH', body: { role: select.value },
+    });
+    toast('Rolle geändert', 'ok');
+    await loadUsers();
+  } catch (exc) {
+    toast(exc.message, 'err');
+    await loadUsers();
+  }
+});
+
+$('#user-list').addEventListener('click', async (event) => {
+  const reset = event.target.closest('[data-reset]');
+  const remove = event.target.closest('[data-deluser]');
+  try {
+    if (reset) {
+      const pass = prompt(`Neues Passwort für ${reset.dataset.name} (min. 10 Zeichen):`);
+      if (!pass) return;
+      await api(`/api/users/${reset.dataset.reset}`, {
+        method: 'PATCH', body: { password: pass },
+      });
+      toast('Passwort gesetzt. Offene Sitzungen wurden beendet.', 'ok');
+      await loadUsers();
+    } else if (remove) {
+      if (!confirm(`${remove.dataset.name} wirklich löschen?`)) return;
+      await api(`/api/users/${remove.dataset.deluser}`, { method: 'DELETE' });
+      toast('Benutzer gelöscht', 'ok');
+      await loadUsers();
+    }
   } catch (exc) { toast(exc.message, 'err'); }
 });
 

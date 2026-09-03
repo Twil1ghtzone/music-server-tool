@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS app_user (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
+    -- 'admin' darf alles, 'user' darf suchen, herunterladen und die eigene
+    -- Warteschlange sehen - aber nichts einstellen und nichts loeschen.
+    role          TEXT NOT NULL DEFAULT 'user',
     totp_secret   TEXT,
     totp_enabled  INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -209,7 +212,7 @@ CREATE TABLE IF NOT EXISTS setting (
 );
 """
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 # Schritte fuer bereits bestehende Datenbanken. SCHEMA legt neue Datenbanken
 # gleich vollstaendig an, deshalb laufen diese Schritte nur bei aelteren.
@@ -218,6 +221,11 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE job ADD COLUMN available_at TEXT",
         "DROP INDEX IF EXISTS ix_job_claim",
         "CREATE INDEX IF NOT EXISTS ix_job_claim ON job(state, available_at, priority, id)",
+    ),
+    3: (
+        "ALTER TABLE app_user ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+        # Wer vor der Rollenverwaltung existierte, konnte alles - das bleibt so.
+        "UPDATE app_user SET role = 'admin'",
     ),
 }
 

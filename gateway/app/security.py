@@ -70,7 +70,7 @@ async def ensure_admin_user() -> None:
         password = secrets.token_urlsafe(18)
         generated = True
     await db.execute(
-        "INSERT INTO app_user(username, password_hash) VALUES (?, ?)",
+        "INSERT INTO app_user(username, password_hash, role) VALUES (?, ?, 'admin')",
         (username, hash_password(password)),
     )
 
@@ -181,7 +181,7 @@ async def load_session_user(token: str | None) -> dict | None:
     if not token:
         return None
     row = await db.fetch_one(
-        "SELECT u.id, u.username, u.totp_enabled, s.id AS sid "
+        "SELECT u.id, u.username, u.role, u.totp_enabled, s.id AS sid "
         "FROM app_session s JOIN app_user u ON u.id = s.user_id "
         "WHERE s.id = ? AND s.expires_at > datetime('now')",
         (_digest(token),),
@@ -230,6 +230,32 @@ async def require_csrf(request: Request) -> None:
 async def guarded(request: Request) -> dict:
     """Auth + CSRF in einem Rutsch - der Standard fuer /api/*."""
     user = await current_user(request)
+    await require_csrf(request)
+    return user
+
+
+def is_admin(user: dict) -> bool:
+    return (user.get("role") or "user") == "admin"
+
+
+async def admin_only(request: Request) -> dict:
+    """Lesend, aber nur fuer Administratoren.
+
+    Was hier haengt, verraet Betriebsinterna oder erlaubt Eingriffe: Pfade,
+    Zugangsdaten-Status, Protokolle, Bibliothekswerkzeuge.
+    """
+    user = await current_user(request)
+    if not is_admin(user):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Dafuer werden Administratorrechte gebraucht.",
+        )
+    return user
+
+
+async def guarded_admin(request: Request) -> dict:
+    """Aendernd und nur fuer Administratoren."""
+    user = await admin_only(request)
     await require_csrf(request)
     return user
 

@@ -23,6 +23,7 @@ from . import preflight
 from .api import auth as auth_api
 from .api import dashboard as dashboard_api
 from .api import library as library_api
+from .api import users as users_api
 from .clients import http
 from .config import ensure_dirs, settings
 from .db import configure, db
@@ -136,6 +137,7 @@ async def readyz() -> JSONResponse:
 app.include_router(auth_api.router)
 app.include_router(dashboard_api.router)
 app.include_router(library_api.router)
+app.include_router(users_api.router)
 app.include_router(subsonic_proxy.router)
 
 if WEB_ROOT.exists():
