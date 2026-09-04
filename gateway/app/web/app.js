@@ -874,19 +874,36 @@ async function loadUsers() {
     </div>`).join('');
 }
 
+// Ein erzeugtes Passwort erscheint genau einmal - danach liegt nur noch der
+// Hash in der Datenbank. Entsprechend auffällig darstellen.
+function zeigePasswort(ziel, username, password) {
+  $(ziel).innerHTML = `
+    <p class="notice" style="margin-top:1rem">
+      Passwort für <strong>${esc(username)}</strong> — wird nur jetzt angezeigt:
+      <code class="secret">${esc(password)}</code>
+      Steht auch im Log: <code>docker logs music-gateway-api | grep Passwort</code>
+    </p>`;
+}
+
 $('#user-create').addEventListener('submit', async (event) => {
   event.preventDefault();
   const data = new FormData(event.target);
+  const password = (data.get('password') || '').trim();
   try {
-    await api('/api/users', {
+    const result = await api('/api/users', {
       method: 'POST',
       body: {
         username: data.get('username'),
-        password: data.get('password'),
+        password: password || null,
         role: data.get('role'),
       },
     });
     event.target.reset();
+    if (result.password) {
+      zeigePasswort('#user-create-result', result.username, result.password);
+    } else {
+      $('#user-create-result').innerHTML = '';
+    }
     toast('Benutzer angelegt', 'ok');
     await loadUsers();
   } catch (exc) { toast(exc.message, 'err'); }
@@ -912,13 +929,17 @@ $('#user-list').addEventListener('click', async (event) => {
   const remove = event.target.closest('[data-deluser]');
   try {
     if (reset) {
-      const pass = prompt(`Neues Passwort für ${reset.dataset.name} (min. 10 Zeichen):`);
-      if (!pass) return;
-      await api(`/api/users/${reset.dataset.reset}`, {
-        method: 'PATCH', body: { password: pass },
+      if (!confirm(`Neues Passwort für ${reset.dataset.name} erzeugen?\n\n`
+                   + 'Es wird einmal angezeigt, und alle offenen Sitzungen '
+                   + 'dieses Benutzers werden beendet.')) return;
+      const result = await api(`/api/users/${reset.dataset.reset}`, {
+        method: 'PATCH', body: { generate_password: true },
       });
-      toast('Passwort gesetzt. Offene Sitzungen wurden beendet.', 'ok');
       await loadUsers();
+      if (result.password) {
+        zeigePasswort('#user-create-result', reset.dataset.name, result.password);
+      }
+      toast('Passwort erzeugt. Offene Sitzungen wurden beendet.', 'ok');
     } else if (remove) {
       if (!confirm(`${remove.dataset.name} wirklich löschen?`)) return;
       await api(`/api/users/${remove.dataset.deluser}`, { method: 'DELETE' });
@@ -947,6 +968,23 @@ $('#password-form').addEventListener('submit', async (event) => {
     });
     event.target.reset();
     toast('Passwort geändert. Andere Sitzungen wurden beendet.', 'ok');
+  } catch (exc) { toast(exc.message, 'err'); }
+});
+
+$('#password-reset').addEventListener('click', async () => {
+  const totp = state.user?.totp_enabled
+    ? prompt('Zwei-Faktor ist aktiv. Code aus der Authenticator-App:')
+    : null;
+  if (state.user?.totp_enabled && !totp) return;
+  if (!confirm('Neues Passwort erzeugen?\n\nAlle offenen Sitzungen werden '
+               + 'beendet — du musst dich danach neu anmelden.')) return;
+  try {
+    const result = await api('/api/auth/password/reset', { method: 'POST', body: { totp } });
+    zeigePasswort('#password-reset-result', result.username, result.password);
+    // Bewusst nicht automatisch abmelden: sonst wäre das Passwort weg,
+    // bevor es jemand notieren konnte. Die Sitzung ist serverseitig ohnehin
+    // ungültig, der nächste Klick führt zum Anmeldefenster.
+    toast('Neues Passwort erzeugt — jetzt notieren.', 'ok');
   } catch (exc) { toast(exc.message, 'err'); }
 });
 

@@ -30,13 +30,16 @@ ROLES = ("admin", "user")
 
 class CreateUserBody(BaseModel):
     username: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9._@-]+$")
-    password: str = Field(min_length=10, max_length=256)
+    # Leer lassen: dann wird eins erzeugt und einmalig zurueckgegeben.
+    password: str | None = Field(default=None, min_length=10, max_length=256)
     role: str = Field(default="user", pattern="^(admin|user)$")
 
 
 class UpdateUserBody(BaseModel):
     role: str | None = Field(default=None, pattern="^(admin|user)$")
     password: str | None = Field(default=None, min_length=10, max_length=256)
+    # Statt selbst eins auszudenken: erzeugen lassen und einmal anzeigen.
+    generate_password: bool = False
 
 
 async def _admin_count(exclude: int | None = None) -> int:
@@ -72,14 +75,26 @@ async def create_user(
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, "Dieser Benutzername ist vergeben")
 
+    password = body.password or security.generate_password()
     user_id = await db.execute(
         "INSERT INTO app_user(username, password_hash, role) VALUES (?,?,?)",
-        (body.username, security.hash_password(body.password), body.role),
+        (body.username, security.hash_password(password), body.role),
     )
+    if not body.password:
+        security.log_password_banner(
+            body.username, password, "Neuer Dashboard-Zugang wurde angelegt"
+        )
     await emit(
         f"Benutzer angelegt: {body.username} ({body.role})", category="auth", level="warn"
     )
-    return {"id": user_id, "username": body.username, "role": body.role}
+    return {
+        "id": user_id,
+        "username": body.username,
+        "role": body.role,
+        # Nur wenn wir es erzeugt haben - ein selbst gesetztes Passwort geben
+        # wir nicht zurueck, es ist ohnehin bekannt.
+        "password": None if body.password else password,
+    }
 
 
 @router.patch("/{user_id}")
@@ -104,7 +119,16 @@ async def update_user(
             category="auth", level="warn",
         )
 
-    if body.password:
+    erzeugt: str | None = None
+    if body.generate_password:
+        erzeugt = await security.reset_password(
+            user_id, target["username"],
+            f"Passwort fuer '{target['username']}' von einem Administrator zurueckgesetzt",
+        )
+        await emit(
+            f"Passwort zurueckgesetzt: {target['username']}", category="auth", level="warn"
+        )
+    elif body.password:
         await db.execute(
             "UPDATE app_user SET password_hash = ? WHERE id = ?",
             (security.hash_password(body.password), user_id),
@@ -116,7 +140,7 @@ async def update_user(
             f"Passwort zurueckgesetzt: {target['username']}", category="auth", level="warn"
         )
 
-    return {"ok": True}
+    return {"ok": True, "password": erzeugt}
 
 
 @router.delete("/{user_id}")

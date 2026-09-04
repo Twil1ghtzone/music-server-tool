@@ -237,8 +237,9 @@
           <h3>Neuen Benutzer anlegen</h3>
           <label>Benutzername
             <input name="username" pattern="[A-Za-z0-9._@-]+" required autocomplete="off"></label>
-          <label>Passwort (min. 10 Zeichen)
-            <input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
+          <label>Passwort — leer lassen, dann wird eins erzeugt
+            <input name="password" type="password" minlength="10" autocomplete="new-password"
+                   placeholder="wird erzeugt"></label>
           <label>Rolle
             <select name="role">
               <option value="user">Benutzer — suchen und herunterladen</option>
@@ -246,6 +247,7 @@
             </select>
           </label>
           <button class="primary">Anlegen</button>
+          <div id="user-create-result"></div>
         </form>
         <div class="card">
           <h3>Vorhandene Benutzer</h3>
@@ -258,13 +260,23 @@
     <section data-view="account" hidden>
       <header class="page-head"><h2>Konto</h2></header>
       <div class="split">
-        <form id="password-form" class="card">
-          <h3>Passwort ändern</h3>
-          <label>Aktuelles Passwort<input name="current" type="password" required></label>
-          <label>Neues Passwort (min. 10 Zeichen)
-            <input name="new" type="password" minlength="10" required></label>
-          <button class="primary">Ändern</button>
-        </form>
+        <div class="card">
+          <form id="password-form">
+            <h3>Passwort ändern</h3>
+            <label>Aktuelles Passwort<input name="current" type="password" required></label>
+            <label>Neues Passwort (min. 10 Zeichen)
+              <input name="new" type="password" minlength="10" required></label>
+            <button class="primary">Ändern</button>
+          </form>
+          <hr style="border:0;border-top:1px solid var(--line);margin:1.1rem 0">
+          <h3>Passwort vergessen</h3>
+          <p class="muted">Erzeugt ein neues Passwort, ohne das alte zu kennen.
+            Es wird hier einmal angezeigt und steht zusätzlich im Log. Alle
+            offenen Sitzungen werden beendet — du musst dich danach neu
+            anmelden.</p>
+          <button id="password-reset" class="danger">Neues Passwort erzeugen</button>
+          <div id="password-reset-result"></div>
+        </div>
         <div class="card">
           <h3>Zwei-Faktor-Authentifizierung</h3>
           <p id="totp-state" class="muted"></p>

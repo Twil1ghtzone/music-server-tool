@@ -152,6 +152,40 @@ sich weder selbst entmachten noch löschen — sonst käme niemand mehr an die
 Einstellungen. Ein zurückgesetztes Passwort beendet alle offenen Sitzungen des
 Betroffenen.
 
+Beim Anlegen kann das Passwortfeld leer bleiben: dann wird eines erzeugt,
+einmal angezeigt und zusätzlich ins Log geschrieben. Danach liegt in der
+Datenbank nur noch der Argon2-Hash.
+
+### Passwort vergessen
+
+Drei Wege, je nachdem, wie weit man noch kommt:
+
+| Lage | Weg |
+|---|---|
+| Angemeldet, altes Passwort bekannt | **Konto → Passwort ändern** |
+| Angemeldet, altes Passwort vergessen | **Konto → Neues Passwort erzeugen** |
+| Ausgesperrt | Kommandozeile (siehe unten) |
+
+```bash
+docker exec music-gateway-api python -m app.reset_password
+```
+
+Setzt den ersten Administrator zurück und gibt das neue Passwort aus. Für ein
+bestimmtes Konto den Namen anhängen:
+
+```bash
+docker exec music-gateway-api python -m app.reset_password mitbewohner
+```
+
+Alle drei Wege beenden sämtliche offenen Sitzungen des Betroffenen — ein
+Zurücksetzen, nach dem der alte Zugang weiterläuft, wäre keins.
+
+> **Abwägung, offen benannt:** wer eine gültige Sitzung im Browser hat, kann
+> über *Neues Passwort erzeugen* das Konto übernehmen, ohne das alte Passwort
+> zu kennen. Beim regulären Wechsel wird es verlangt, hier nicht. Ist
+> Zwei-Faktor eingeschaltet, wird deshalb ein Code abgefragt. Wem das zu weit
+> geht, nutzt ausschließlich den Weg über die Kommandozeile.
+
 Die Navigation blendet aus, was die Rolle nicht darf. Das ist reine
 Aufgeräumtheit: die Endpunkte lehnen es unabhängig davon mit 403 ab, auch bei
 direktem Aufruf.

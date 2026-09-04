@@ -67,7 +67,7 @@ async def ensure_admin_user() -> None:
     password = settings.admin_password
     generated = False
     if not password:
-        password = secrets.token_urlsafe(18)
+        password = generate_password()
         generated = True
     await db.execute(
         "INSERT INTO app_user(username, password_hash, role) VALUES (?, ?, 'admin')",
@@ -79,15 +79,8 @@ async def ensure_admin_user() -> None:
         return
 
     # Ohne gesetztes Passwort ist das Log der einzige Ort, an dem der Zugang
-    # steht. Entsprechend schwer zu uebersehen ausgeben - und nur dieses eine
-    # Mal, denn danach liegt in der Datenbank nur noch der Argon2-Hash.
-    line = "=" * 68
-    log.warning("\n%s", line)
-    log.warning("  Dashboard-Zugang wurde angelegt")
-    log.warning("     Benutzer:       %s", username)
-    log.warning("     Start-Passwort: %s", password)
-    log.warning("  Im Dashboard unter 'Konto' aendern. Diese Meldung erscheint nur einmal.")
-    log.warning("%s\n", line)
+    # steht - danach liegt in der Datenbank nur noch der Argon2-Hash.
+    log_password_banner(username, password, "Dashboard-Zugang wurde angelegt")
 
 
 # -------------------------------------------------------------- Rate-Limiting
@@ -261,6 +254,45 @@ async def guarded_admin(request: Request) -> dict:
 
 
 # ------------------------------------------------------------------- 2FA
+def generate_password() -> str:
+    """Sprechbares, aber nicht ratbares Passwort.
+
+    token_urlsafe liefert Zeichen, die sich schlecht abtippen lassen (- und _
+    sehen in Logs nach Trennern aus). Deshalb ein eigener Zeichenvorrat ohne
+    verwechselbare Zeichen - kein O/0, kein l/I/1.
+    """
+    alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(20))
+
+
+def log_password_banner(username: str, password: str, grund: str) -> None:
+    """Erzeugte Passwoerter gehoeren unuebersehbar ins Log - dort sucht man
+    sie, wenn die Oberflaeche gerade nicht erreichbar ist."""
+    line = "=" * 68
+    log.warning("\n%s", line)
+    log.warning("  %s", grund)
+    log.warning("     Benutzer:  %s", username)
+    log.warning("     Passwort:  %s", password)
+    log.warning("  Diese Meldung erscheint nur einmal.")
+    log.warning("%s\n", line)
+
+
+async def reset_password(user_id: int, username: str, grund: str) -> str:
+    """Neues Passwort erzeugen, setzen und alle Sitzungen beenden.
+
+    Alle Sitzungen - auch die eigene. Ein Zuruecksetzen, nach dem der alte
+    Zugang weiterlaeuft, waere keins.
+    """
+    password = generate_password()
+    await db.execute(
+        "UPDATE app_user SET password_hash = ? WHERE id = ?",
+        (hash_password(password), user_id),
+    )
+    await db.execute("DELETE FROM app_session WHERE user_id = ?", (user_id,))
+    log_password_banner(username, password, grund)
+    return password
+
+
 def new_totp_secret() -> str:
     return pyotp.random_base32()
 

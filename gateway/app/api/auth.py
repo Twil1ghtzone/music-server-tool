@@ -130,6 +130,47 @@ async def change_password(
     return {"ok": True}
 
 
+class ResetBody(BaseModel):
+    totp: str | None = Field(default=None, max_length=10)
+
+
+@router.post("/password/reset")
+async def reset_own_password(
+    body: ResetBody, user: dict = Depends(security.guarded)
+) -> dict:
+    """Neues Passwort erzeugen lassen, ohne das alte zu kennen.
+
+    Gedacht fuer den Fall, dass das erzeugte Startpasswort verloren ging, die
+    Sitzung im Browser aber noch steht.
+
+    Abwaegung, offen benannt: wer eine gueltige Sitzung hat, kann damit das
+    Passwort uebernehmen - beim regulaeren Wechsel ist das alte Passwort noetig,
+    hier nicht. Ist Zwei-Faktor eingeschaltet, wird deshalb ein Code verlangt.
+    Wer ganz ausgesperrt ist, nutzt "python -m app.reset_password" im Container.
+    """
+    row = await db.fetch_one("SELECT * FROM app_user WHERE id = ?", (user["id"],))
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Benutzer nicht gefunden")
+
+    if row["totp_enabled"]:
+        if not body.totp or not security.verify_totp(row["totp_secret"] or "", body.totp):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Zwei-Faktor ist aktiv - bitte den Code aus der Authenticator-App eingeben.",
+            )
+
+    password = await security.reset_password(
+        int(user["id"]), row["username"], "Passwort ueber das Dashboard zurueckgesetzt"
+    )
+    await emit(
+        f"Passwort zurueckgesetzt: {row['username']} (alle Sitzungen beendet)",
+        category="auth", level="warn",
+    )
+    # Auch im Rumpf, damit man es nicht im Log suchen muss - danach steht in
+    # der Datenbank nur noch der Hash.
+    return {"password": password, "username": row["username"]}
+
+
 @router.post("/totp/setup")
 async def totp_setup(user: dict = Depends(security.guarded)) -> dict:
     secret = security.new_totp_secret()
