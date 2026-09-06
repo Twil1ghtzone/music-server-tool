@@ -11,6 +11,12 @@ Schutzmarkierung. Der Scanner darf sie weiterhin in einer Gruppe zeigen -
 man soll ja sehen, dass es sie doppelt gibt - aber nie zum Entfernen
 auswaehlen.
 
+Abgeglichen wird ueber ALLE bekannten Konten: den Zugang des Gateways und
+jeden persoenlichen Zugang eines Dashboard-Benutzers. Sonst haette wer auch
+immer den Lauf startet, die Playlists der anderen geloescht - Favoriten und
+Bewertungen sind in Navidrome pro Benutzer, und ein Schutz, der nur den
+eigenen kennt, ist keiner.
+
 Nebenbei faellt dabei die Zuordnung Pfad -> Navidrome-ID ab. Die braucht die
 Oberflaeche, um zu einer lokalen Datei Cover und Hoerprobe zu zeigen.
 """
@@ -69,7 +75,8 @@ async def handle_sync(job: dict[str, Any]) -> str:
     """Holt Playlists, Favoriten und Bewertungen und markiert den Index."""
     job_id = int(job["id"])
 
-    if not await navidrome.has_credentials_async():
+    konten = await navidrome.alle_konten()
+    if not konten:
         # Ohne Zugang laesst sich nicht feststellen, was geschuetzt ist. Das
         # ist kein Grund weiterzumachen, sondern einer aufzuhoeren: ohne
         # diese Information waere jeder Bereinigungsvorschlag ein Risiko.
@@ -77,7 +84,7 @@ async def handle_sync(job: dict[str, Any]) -> str:
             "Der Abgleich braucht Navidrome-Zugangsdaten. Ohne sie laesst sich "
             "nicht feststellen, welche Titel in Playlists stehen oder bewertet "
             "sind - und ohne das darf nichts bereinigt werden. Zugang unter "
-            "Diagnose eintragen."
+            "Diagnose eintragen oder ein Konto unter Mediathek verbinden."
         )
 
     await jobs.progress(job_id, 0.05, "Lese den lokalen Index")
@@ -91,60 +98,71 @@ async def handle_sync(job: dict[str, Any]) -> str:
     geschuetzt: dict[int, str] = {}
     gesehen = 0
 
-    # --- Ein Durchlauf ueber alle Titel: ID, Pfad, Favorit, Bewertung ------
-    await jobs.progress(job_id, 0.1, "Gehe die Bibliothek in Navidrome durch")
-    async for song in navidrome.iter_songs():
-        gesehen += 1
-        pfad = song.get("path") or ""
-        nd_id = str(song.get("id") or "")
-        if not pfad or not nd_id:
-            continue
-        zeile = _finde(index, pfad)
-        if zeile is None:
-            continue
-        nach_nd[nd_id] = zeile
+    # --- Je Konto einmal durch die Bibliothek ------------------------------
+    # Favoriten und Bewertungen sind in Navidrome pro Benutzer. Ein Durchlauf
+    # mit einem Konto sieht die des anderen nicht - also alle abfragen.
+    anteil_je_konto = 0.8 / len(konten)
+    for nummer, konto in enumerate(konten):
+        basis = 0.1 + nummer * anteil_je_konto
+        wer = konto.get("u", "?")
+        await jobs.progress(job_id, basis, f"Konto {nummer + 1} von {len(konten)}: {wer}")
 
-        if song.get("starred"):
-            geschuetzt[zeile] = "favorit"
-        elif song.get("userRating"):
-            geschuetzt.setdefault(zeile, "bewertet")
+        async for song in navidrome.iter_songs_mit(konto):
+            gesehen += 1
+            pfad = song.get("path") or ""
+            nd_id = str(song.get("id") or "")
+            if not pfad or not nd_id:
+                continue
+            zeile = _finde(index, pfad)
+            if zeile is None:
+                continue
+            nach_nd[nd_id] = zeile
 
-        if gesehen % 2000 == 0:
-            await jobs.progress(job_id, min(0.6, 0.1 + gesehen / 60000),
-                                f"{gesehen} Titel abgeglichen")
+            if song.get("starred"):
+                geschuetzt[zeile] = "favorit"
+            elif song.get("userRating"):
+                geschuetzt.setdefault(zeile, "bewertet")
 
-    # --- Playlists ---------------------------------------------------------
-    await jobs.progress(job_id, 0.7, "Lese die Playlists")
-    listen = await navidrome.playlists()
-    for nummer, liste in enumerate(listen, start=1):
+            if gesehen % 2000 == 0:
+                await jobs.progress(
+                    job_id, min(basis + anteil_je_konto * 0.6, 0.88),
+                    f"{wer}: {gesehen} Titel abgeglichen")
+
+        # --- Playlists dieses Kontos ---------------------------------------
         try:
-            eintraege = await navidrome.playlist_songs(str(liste.get("id")))
+            listen = await navidrome.playlists_mit(konto)
         except Exception as exc:
-            log.warning("Playlist %s nicht lesbar: %s", liste.get("name"), exc)
-            continue
-        for eintrag in eintraege:
-            zeile = nach_nd.get(str(eintrag.get("id")))
-            if zeile is None and eintrag.get("path"):
-                zeile = _finde(index, eintrag["path"])
-            if zeile is not None:
-                # Playlist schlaegt alles: hier haengt eine Reihenfolge dran,
-                # die sich nicht wiederherstellen laesst.
-                geschuetzt[zeile] = "playlist"
-        await jobs.progress(job_id, 0.7 + 0.2 * nummer / max(len(listen), 1),
-                            f"Playlist {nummer} von {len(listen)}")
+            log.warning("Playlists von %s nicht lesbar: %s", wer, exc)
+            listen = []
+        for liste in listen:
+            try:
+                eintraege = await navidrome.playlist_songs_mit(konto, str(liste.get("id")))
+            except Exception as exc:
+                log.warning("Playlist %s nicht lesbar: %s", liste.get("name"), exc)
+                continue
+            for eintrag in eintraege:
+                zeile = nach_nd.get(str(eintrag.get("id")))
+                if zeile is None and eintrag.get("path"):
+                    zeile = _finde(index, eintrag["path"])
+                if zeile is not None:
+                    # Playlist schlaegt alles: hier haengt eine Reihenfolge
+                    # dran, die sich nicht wiederherstellen laesst.
+                    geschuetzt[zeile] = "playlist"
+        await jobs.progress(job_id, min(basis + anteil_je_konto * 0.85, 0.92),
+                            f"{wer}: {len(listen)} Playlist(s)")
 
-    # --- Favoriten nachziehen ----------------------------------------------
-    # getStarred2 ist billiger und vollstaendiger als das Feld am Titel:
-    # manche Navidrome-Versionen liefern "starred" nur in der Detailansicht.
-    try:
-        for song in await navidrome.starred_songs():
-            zeile = nach_nd.get(str(song.get("id")))
-            if zeile is None and song.get("path"):
-                zeile = _finde(index, song["path"])
-            if zeile is not None:
-                geschuetzt.setdefault(zeile, "favorit")
-    except Exception as exc:
-        log.warning("Favoriten nicht abrufbar: %s", exc)
+        # --- Favoriten nachziehen ------------------------------------------
+        # getStarred2 ist billiger und vollstaendiger als das Feld am Titel:
+        # manche Navidrome-Versionen liefern "starred" nur in der Detailansicht.
+        try:
+            for song in await navidrome.starred_songs_mit(konto):
+                zeile = nach_nd.get(str(song.get("id")))
+                if zeile is None and song.get("path"):
+                    zeile = _finde(index, song["path"])
+                if zeile is not None:
+                    geschuetzt.setdefault(zeile, "favorit")
+        except Exception as exc:
+            log.warning("Favoriten von %s nicht abrufbar: %s", wer, exc)
 
     # --- Schreiben ----------------------------------------------------------
     await jobs.progress(job_id, 0.95, "Schreibe die Markierungen")
@@ -164,12 +182,14 @@ async def handle_sync(job: dict[str, Any]) -> str:
     teile = ", ".join(f"{n} {g}" for g, n in sorted(nach_grund.items()))
 
     await emit(
-        f"Abgleich mit Navidrome: {len(geschuetzt)} Titel geschuetzt ({teile or 'keine'}), "
+        f"Abgleich mit Navidrome ueber {len(konten)} Konto/Konten: "
+        f"{len(geschuetzt)} Titel geschuetzt ({teile or 'keine'}), "
         f"{len(nach_nd)} zugeordnet",
         category="dedupe",
     )
-    return (f"{gesehen} Titel gelesen, {len(nach_nd)} zugeordnet, "
-            f"{len(geschuetzt)} geschuetzt ({teile or 'keine'})")
+    return (f"{len(konten)} Konto/Konten, {gesehen} Titel gelesen, "
+            f"{len(nach_nd)} zugeordnet, {len(geschuetzt)} geschuetzt "
+            f"({teile or 'keine'})")
 
 
 async def stand() -> dict[str, Any]:

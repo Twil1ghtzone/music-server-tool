@@ -5,9 +5,15 @@ Groessen, Duplikate. Was tatsaechlich in der Musiksammlung steht - Alben mit
 Coverbild, nach Interpret geordnet - stand nur in Navidrome.
 
 Diese Seite holt es von dort. Nicht als zweite Bibliothek: die Wahrheit
-bleibt Navidrome, hier wird nur gezeigt. Alles laeuft ueber die
-Zugangsdaten des Gateways, damit das Dashboard keine eigene Subsonic-Sitzung
-braucht.
+bleibt Navidrome, hier wird nur gezeigt.
+
+Jeder Dashboard-Benutzer verbindet sein EIGENES Navidrome-Konto. Das ist
+keine Formsache: Playlists, Favoriten und Bewertungen gehoeren einem
+Menschen. Lief alles ueber einen gemeinsamen Zugang, sah jeder
+Administrator die Favoriten desjenigen, der sich zuerst verbunden hatte -
+und markierte in dessen Namen. Der Zugang des Gateways bleibt daneben
+bestehen, aber der ist fuer die Software da (Scan anstossen, importierte
+Dateien aufloesen), nicht fuer eine Mediathek.
 
 Cover kommen ueber diesen Server, nicht direkt von Navidrome: die
 Content-Security-Policy steht auf 'self'. Sie werden auf Platte
@@ -23,10 +29,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
 from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from .. import security
+from .. import events, security
 from ..clients import http, navidrome
 from ..config import settings
 from ..logging_conf import get_logger
@@ -59,26 +66,62 @@ def _pruefe_id(wert: str) -> str:
     return wert
 
 
-async def _verlangt_zugang() -> None:
-    if not await navidrome.has_credentials_async():
+async def _zugang(user: dict) -> int:
+    """Die Kennung des Dashboard-Benutzers - und die Zusicherung, dass er
+    ein eigenes Navidrome-Konto verbunden hat."""
+    user_id = int(user["id"])
+    if not await navidrome.user_params(user_id):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Kein Navidrome-Zugang hinterlegt. Verbinde dein Konto oben auf dieser "
-            "Seite - dann erscheint hier deine Mediathek.",
+            "Du hast noch kein Navidrome-Konto verbunden. Melde dich oben auf "
+            "dieser Seite an - dann erscheint hier deine Mediathek, mit deinen "
+            "Playlists und deinen Favoriten.",
         )
+    return user_id
 
 
 @router.get("/status")
 async def status_(user: dict = Depends(security.current_user)) -> dict:
-    """Steht ein Zugang, und was sagt Navidrome dazu?"""
-    zugang = await navidrome.credentials_info()
-    if not zugang.get("configured"):
-        return {**zugang, "online": await navidrome.reachable(), "server": None}
+    """Hat DIESER Benutzer ein Konto verbunden, und antwortet Navidrome?"""
+    eigener = await navidrome.user_info(int(user["id"]))
+    online = await navidrome.reachable()
+    if not eigener["configured"]:
+        return {**eigener, "online": online, "server": None}
     try:
-        server = await navidrome.server_info()
+        antwort = await navidrome.user_call(int(user["id"]), "ping")
+        server = {"version": antwort.get("version"), "type": antwort.get("type")}
     except Exception as exc:
         server = {"error": str(exc)}
-    return {**zugang, "online": await navidrome.reachable(), "server": server}
+    return {**eigener, "online": online, "server": server, "editable": True}
+
+
+class ZugangBody(BaseModel):
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/connect")
+async def connect(body: ZugangBody, user: dict = Depends(security.guarded)) -> dict:
+    """Verbindet das Navidrome-Konto DIESES Dashboard-Benutzers."""
+    if not await navidrome.reachable():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"Navidrome ist unter {settings.navidrome_url} nicht erreichbar")
+    try:
+        await navidrome.set_user_credentials(int(user["id"]), body.username, body.password)
+    except navidrome.NavidromeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await events.emit(
+        f"Navidrome-Konto '{body.username}' mit dem Dashboard-Zugang "
+        f"'{user.get('username')}' verbunden",
+        category="auth")
+    return await navidrome.user_info(int(user["id"]))
+
+
+@router.delete("/connect")
+async def disconnect(user: dict = Depends(security.guarded)) -> dict:
+    await navidrome.clear_user_credentials(int(user["id"]))
+    return {"configured": False}
 
 
 @router.get("/albums")
@@ -88,15 +131,15 @@ async def albums(
     limit: int = Query(48, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     if sort not in SORTIERUNG:
         sort = "newest"
     # Eine Seite mehr holen, als gezeigt wird: daran erkennt die Oberflaeche,
     # ob es weitergeht, ohne die Gesamtzahl zu kennen. Navidrome nennt sie
     # ueber diesen Endpunkt naemlich nicht.
     try:
-        body = await navidrome.call(
-            "getAlbumList2", {"type": sort, "size": limit + 1, "offset": offset})
+        body = await navidrome.user_call(
+            user_id, "getAlbumList2", {"type": sort, "size": limit + 1, "offset": offset})
     except navidrome.NavidromeError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     liste = (body.get("albumList2") or {}).get("album") or []
@@ -111,10 +154,10 @@ async def albums(
 
 @router.get("/album/{album_id}")
 async def album(album_id: str, user: dict = Depends(security.current_user)) -> dict:
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     _pruefe_id(album_id)
     try:
-        body = await navidrome.call("getAlbum", {"id": album_id})
+        body = await navidrome.user_call(user_id, "getAlbum", {"id": album_id})
     except navidrome.NavidromeError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     daten = body.get("album") or {}
@@ -125,9 +168,9 @@ async def album(album_id: str, user: dict = Depends(security.current_user)) -> d
 
 @router.get("/artists")
 async def artists(user: dict = Depends(security.current_user)) -> dict:
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     try:
-        body = await navidrome.call("getArtists")
+        body = await navidrome.user_call(user_id, "getArtists")
     except navidrome.NavidromeError as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
     gruppen = (body.get("artists") or {}).get("index") or []
@@ -136,10 +179,10 @@ async def artists(user: dict = Depends(security.current_user)) -> dict:
 
 @router.get("/artist/{artist_id}")
 async def artist(artist_id: str, user: dict = Depends(security.current_user)) -> dict:
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     _pruefe_id(artist_id)
     try:
-        body = await navidrome.call("getArtist", {"id": artist_id})
+        body = await navidrome.user_call(user_id, "getArtist", {"id": artist_id})
     except navidrome.NavidromeError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     daten = body.get("artist") or {}
@@ -154,10 +197,10 @@ async def suche(
     q: str = Query(min_length=1, max_length=200),
     limit: int = Query(30, ge=1, le=100),
 ) -> dict:
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     try:
-        body = await navidrome.call(
-            "search3",
+        body = await navidrome.user_call(
+            user_id, "search3",
             {"query": q, "songCount": limit, "albumCount": limit, "artistCount": limit},
         )
     except navidrome.NavidromeError as exc:
@@ -180,9 +223,9 @@ async def stream(song_id: str, request: Request,
     mit denen des Gateways, wie beim Cover. Bereichsanfragen werden
     weitergereicht, damit der Browser springen kann.
     """
-    await _verlangt_zugang()
+    user_id = await _zugang(user)
     _pruefe_id(song_id)
-    params = await navidrome._credentials()
+    params = await navidrome.user_params(user_id)
     params.update({"id": song_id})
 
     kopf = {}
@@ -227,6 +270,7 @@ async def cover(
     Navidrome das Bild nicht aufloesen kann, schreibt es je Anfrage eine
     Warnung in sein Log.
     """
+    user_id = await _zugang(user)
     _pruefe_id(cover_id)
     merker = f"{cover_id}:{s}"
     if merker in _OHNE_COVER:
@@ -237,8 +281,7 @@ async def cover(
         return Response(ziel.read_bytes(), media_type="image/jpeg",
                         headers={"Cache-Control": "private, max-age=604800"})
 
-    await _verlangt_zugang()
-    params = await navidrome._credentials()
+    params = await navidrome.user_params(user_id)
     params.update({"id": cover_id, "size": str(s)})
     try:
         antwort = await http.navidrome().get(

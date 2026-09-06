@@ -53,7 +53,9 @@ export async function mount(wurzel) {
          ${cred.editable ? '<button type="button" class="btn btn-ghost" id="cred-clear">Zugang entfernen</button>'
                          : '<p class="muted small">In der Umgebung gesetzt — hier nicht änderbar.</p>'}`
       : `<p class="muted">Der Gateway braucht einen Navidrome-Zugang, um importierte Titel
-           auf ihre ID aufzulösen und Scans anzustoßen.</p>
+           auf ihre ID aufzulösen und Scans anzustoßen. Das ist der Zugang der
+           <strong>Software</strong> — für deine eigene Mediathek verbindest du dein
+           Konto unter <em>Mediathek</em>, und der gilt nur für dich.</p>
          <form class="row" id="cred-form">
            <label class="sr-only" for="c-user">Navidrome-Benutzer</label>
            <input id="c-user" name="username" placeholder="Navidrome-Benutzer" autocomplete="off"

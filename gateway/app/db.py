@@ -209,6 +209,25 @@ CREATE TABLE IF NOT EXISTS dupe_member (
     PRIMARY KEY (group_id, media_file_id)
 );
 
+-- Der persoenliche Navidrome-Zugang eines Dashboard-Benutzers.
+--
+-- Getrennt vom Systemzugang in der setting-Tabelle, und zwar aus einem
+-- konkreten Grund: der Systemzugang ist die Software selbst (Scan anstossen,
+-- eine importierte Datei auf ihre ID aufloesen). Dieser hier ist ein Mensch.
+-- Lagen beide zusammen, sah jeder Administrator die Playlists, Favoriten und
+-- Bewertungen desjenigen, der sich zuerst verbunden hatte - und handelte in
+-- dessen Namen.
+--
+-- Gespeichert wird nicht das Passwort, sondern das daraus erzeugte
+-- Subsonic-Tripel (Benutzer, Token, Salt) - genau das, was jeder Musik-Client
+-- ohnehin bei jeder Anfrage ueber die Leitung schickt.
+CREATE TABLE IF NOT EXISTS user_navidrome (
+    user_id    INTEGER PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+    nd_user    TEXT NOT NULL,
+    params     TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Was in der Quarantaene liegt und wann es endgueltig verschwindet.
 -- Ohne diese Tabelle waere der Ordner eine Halde: man sieht Dateien, aber
 -- nicht, woher sie kamen, wann sie kamen und wohin sie zurueckgehoeren.
@@ -249,7 +268,7 @@ CREATE TABLE IF NOT EXISTS setting (
 );
 """
 
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 # Schritte fuer bereits bestehende Datenbanken. SCHEMA legt neue Datenbanken
 # gleich vollstaendig an, deshalb laufen diese Schritte nur bei aelteren.
@@ -287,6 +306,14 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         )""",
         "CREATE INDEX IF NOT EXISTS ix_quarantine_purge ON quarantine_item(state, purge_at)",
         "CREATE INDEX IF NOT EXISTS ix_quarantine_group ON quarantine_item(group_id)",
+    ),
+    5: (
+        """CREATE TABLE IF NOT EXISTS user_navidrome (
+            user_id    INTEGER PRIMARY KEY REFERENCES app_user(id) ON DELETE CASCADE,
+            nd_user    TEXT NOT NULL,
+            params     TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )""",
     ),
 }
 

@@ -152,6 +152,102 @@ async def _load() -> None:
         _borrowed, _source = {}, None
 
 
+# ------------------------------------------- Persoenliche Zugaenge
+# Der Zugang oben ist der des Gateways: er stoesst Scans an und loest
+# importierte Dateien auf ihre ID auf. Das ist die Software, kein Mensch.
+#
+# Was hier folgt, ist der Zugang EINES Dashboard-Benutzers. Beides zu
+# vermischen war ein Fehler: sobald sich ein Administrator verbunden hatte,
+# sah jeder andere dessen Playlists, Favoriten und Bewertungen - und handelte
+# in dessen Namen. Wessen Mediathek man sieht, darf nicht davon abhaengen,
+# wer sich zufaellig zuerst verbunden hat.
+
+
+async def set_user_credentials(user_id: int, username: str, password: str) -> dict[str, str]:
+    """Prueft die Zugangsdaten und legt sie fuer genau diesen Benutzer ab."""
+    from ..db import db
+
+    params = auth_params(username, password)
+    if not await verify_client_credentials(params):
+        raise NavidromeError("Navidrome lehnt diese Zugangsdaten ab")
+    behalten = {k: v for k, v in params.items() if k in _AUTH_KEYS and v}
+    await db.execute(
+        "INSERT INTO user_navidrome(user_id, nd_user, params) VALUES (?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET nd_user = excluded.nd_user, "
+        "params = excluded.params, created_at = datetime('now')",
+        (user_id, username, json.dumps(behalten)),
+    )
+    log.info("Persoenlicher Navidrome-Zugang fuer Dashboard-Benutzer %s: '%s'",
+             user_id, username)
+    return behalten
+
+
+async def user_params(user_id: int) -> dict[str, str] | None:
+    """Das Subsonic-Tripel dieses Benutzers - oder None."""
+    from ..db import db
+
+    zeile = await db.fetch_one(
+        "SELECT params FROM user_navidrome WHERE user_id = ?", (user_id,))
+    if not zeile:
+        return None
+    try:
+        gespeichert = json.loads(zeile["params"])
+    except (TypeError, ValueError):
+        return None
+    return {**gespeichert, "v": API_VERSION, "c": CLIENT_NAME, "f": "json"}
+
+
+async def clear_user_credentials(user_id: int) -> None:
+    from ..db import db
+
+    await db.execute("DELETE FROM user_navidrome WHERE user_id = ?", (user_id,))
+
+
+async def user_info(user_id: int) -> dict[str, Any]:
+    from ..db import db
+
+    zeile = await db.fetch_one(
+        "SELECT nd_user, created_at FROM user_navidrome WHERE user_id = ?", (user_id,))
+    if not zeile:
+        return {"configured": False, "username": None}
+    return {"configured": True, "username": zeile["nd_user"], "since": zeile["created_at"]}
+
+
+async def user_call(user_id: int, endpoint: str,
+                    params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Wie call(), aber mit den Zugangsdaten dieses Benutzers."""
+    eigene = await user_params(user_id)
+    if not eigene:
+        raise NoCredentials("Kein persoenlicher Navidrome-Zugang hinterlegt")
+    return await _call_mit(eigene, endpoint, params)
+
+
+async def alle_konten() -> list[dict[str, str]]:
+    """Jeder bekannte Zugang: der des Gateways und jeder persoenliche.
+
+    Gebraucht vom Duplikatschutz. Eine Datei, die in der Playlist EINES
+    Benutzers steht, darf nicht verschwinden, weil ein anderer den Lauf
+    gestartet hat - der Schutz muss ueber alle Konten hinweg gelten.
+    """
+    from ..db import db
+
+    konten: list[dict[str, str]] = []
+    try:
+        system = await _credentials()
+        if system.get("u"):
+            konten.append(system)
+    except Exception:
+        pass
+
+    gesehen = {k.get("u") for k in konten}
+    for zeile in await db.fetch_all("SELECT user_id FROM user_navidrome"):
+        eigene = await user_params(int(zeile["user_id"]))
+        if eigene and eigene.get("u") not in gesehen:
+            konten.append(eigene)
+            gesehen.add(eigene.get("u"))
+    return konten
+
+
 async def credentials_info() -> dict[str, Any]:
     """Fuer das Dashboard: woher stammt der Zugang, und auf welchen Benutzer
     laeuft er?"""
@@ -222,13 +318,24 @@ async def reachable() -> bool:
         return False
 
 
-async def call(endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    query = await _credentials()
+async def _call_mit(query: dict[str, str], endpoint: str,
+                    params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Ein Subsonic-Aufruf mit einem bestimmten Satz Zugangsdaten.
+
+    Getrennt von call(), weil es zwei Sorten gibt: die des Gateways und die
+    eines Dashboard-Benutzers. Der Rest des Aufrufs ist derselbe.
+    """
+    abfrage = dict(query)
     if params:
-        query.update({k: v for k, v in params.items() if v is not None})
-    resp = await http.navidrome().get(f"/rest/{endpoint}", params=query)
+        abfrage.update({k: v for k, v in params.items() if v is not None})
+    resp = await http.navidrome().get(f"/rest/{endpoint}", params=abfrage)
     resp.raise_for_status()
     return _unwrap(resp.json())
+
+
+async def call(endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mit den Zugangsdaten des Gateways - fuer alles, was die Software tut."""
+    return await _call_mit(await _credentials(), endpoint, params)
 
 
 # ---------------------------------------------------------------- Betrieb
@@ -327,24 +434,43 @@ async def library_stats() -> dict[str, Any]:
 # Historie haengt an Navidromes media_file-ID - verschwindet die Datei,
 # verschwindet sie mit, und in der Playlist reisst ein Loch.
 
-async def playlists() -> list[dict]:
-    body = await call("getPlaylists")
+# Jede dieser Abfragen gibt es zweimal: einmal mit dem Zugang des Gateways
+# (fuer den Normalfall) und einmal mit einem beliebigen Satz Zugangsdaten
+# (fuer den Duplikatschutz, der ueber alle Konten laufen muss). Favoriten,
+# Bewertungen und Playlists sind in Navidrome pro Benutzer - eine Abfrage
+# mit einem Konto sieht die des anderen schlicht nicht.
+
+async def playlists_mit(konto: dict[str, str]) -> list[dict]:
+    body = await _call_mit(konto, "getPlaylists")
     return (body.get("playlists") or {}).get("playlist") or []
 
 
-async def playlist_songs(playlist_id: str) -> list[dict]:
-    body = await call("getPlaylist", {"id": playlist_id})
+async def playlists() -> list[dict]:
+    return await playlists_mit(await _credentials())
+
+
+async def playlist_songs_mit(konto: dict[str, str], playlist_id: str) -> list[dict]:
+    body = await _call_mit(konto, "getPlaylist", {"id": playlist_id})
     return (body.get("playlist") or {}).get("entry") or []
 
 
-async def starred_songs() -> list[dict]:
+async def playlist_songs(playlist_id: str) -> list[dict]:
+    return await playlist_songs_mit(await _credentials(), playlist_id)
+
+
+async def starred_songs_mit(konto: dict[str, str]) -> list[dict]:
     """Favorisierte Titel. getStarred2 ist der einzige Endpunkt, der sie
     vollstaendig und billig liefert."""
-    body = await call("getStarred2")
+    body = await _call_mit(konto, "getStarred2")
     return (body.get("starred2") or {}).get("song") or []
 
 
-async def iter_songs(page_size: int = 500, max_songs: int = 200_000):
+async def starred_songs() -> list[dict]:
+    return await starred_songs_mit(await _credentials())
+
+
+async def iter_songs_mit(konto: dict[str, str], page_size: int = 500,
+                         max_songs: int = 200_000):
     """Laeuft einmal ueber alle Titel, seitenweise.
 
     Bewertungen haben keinen eigenen Endpunkt - sie stehen als "userRating"
@@ -354,7 +480,11 @@ async def iter_songs(page_size: int = 500, max_songs: int = 200_000):
     """
     offset = 0
     while offset < max_songs:
-        seite = await search_songs('""', count=page_size, offset=offset)
+        body = await _call_mit(konto, "search3", {
+            "query": '""', "songCount": page_size, "songOffset": offset,
+            "albumCount": 0, "artistCount": 0,
+        })
+        seite = (body.get("searchResult3") or {}).get("song") or []
         if not seite:
             return
         for song in seite:
@@ -362,6 +492,12 @@ async def iter_songs(page_size: int = 500, max_songs: int = 200_000):
         if len(seite) < page_size:
             return
         offset += page_size
+
+
+async def iter_songs(page_size: int = 500, max_songs: int = 200_000):
+    konto = await _credentials()
+    async for song in iter_songs_mit(konto, page_size, max_songs):
+        yield song
 
 
 # ------------------------------------------------------- Credential-Check

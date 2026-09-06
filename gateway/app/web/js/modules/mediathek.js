@@ -3,6 +3,11 @@
 // Die Wahrheit bleibt Navidrome — das hier ist keine zweite Bibliothek,
 // sondern ein Fenster in die vorhandene. Ohne verbundenes Konto steht an
 // dieser Stelle das Anmeldeformular statt einer leeren Seite.
+//
+// Jeder Dashboard-Benutzer verbindet sein EIGENES Navidrome-Konto. Playlists,
+// Favoriten und Bewertungen gehören einem Menschen — ein gemeinsamer Zugang
+// hätte geheißen, dass jeder die Favoriten dessen sieht, der sich zuerst
+// verbunden hat, und in dessen Namen markiert.
 
 import { get, post, del, q } from '../core/api.js';
 import { $, $$, esc, icon, num, duration, empty, failure, skeleton } from '../core/dom.js';
@@ -52,9 +57,11 @@ export async function mount(wurzel, ctx) {
     $('#m-aktionen').innerHTML = '';
     $('#m-zugang').innerHTML = `
       <div class="card">
-        <h3>Navidrome-Konto verbinden</h3>
-        <p class="muted small">Melde dich einmal mit deinem Navidrome-Zugang an. Daraus
-          entsteht ein Subsonic-Token — das Passwort selbst wird nicht gespeichert.
+        <h3>Dein Navidrome-Konto verbinden</h3>
+        <p class="muted small">Melde dich einmal mit deinem eigenen Navidrome-Zugang an.
+          Daraus entsteht ein Subsonic-Token — das Passwort selbst wird nicht gespeichert.
+          Der Zugang gilt nur für dich: du siehst deine Playlists und deine Favoriten,
+          nicht die eines anderen.
           ${info?.online === false
             ? '<strong class="error">Navidrome antwortet gerade nicht.</strong>' : ''}</p>
         <form class="row mt-3" id="m-login">
@@ -77,9 +84,8 @@ export async function mount(wurzel, ctx) {
           server.version ? ` · Navidrome ${esc(server.version)}` : ''}${
           server.error ? ` — <span class="error">${esc(server.error)}</span>` : ''}
       </div></div>`;
-    $('#m-aktionen').innerHTML = info.editable
-      ? '<button type="button" class="btn btn-ghost" id="m-trennen">Konto trennen</button>'
-      : '<span class="faint tiny">Zugang kommt aus der Umgebung</span>';
+    $('#m-aktionen').innerHTML =
+      '<button type="button" class="btn btn-ghost" id="m-trennen">Konto trennen</button>';
   }
 
   // ------------------------------------------------------------ Inhalt
@@ -253,7 +259,7 @@ export async function mount(wurzel, ctx) {
     knopf.disabled = true;
     const daten = new FormData(form);
     try {
-      await post('/api/navidrome/credentials', {
+      await post('/api/mediathek/connect', {
         username: daten.get('username'), password: daten.get('password'),
       });
       ok('Verbunden — deine Mediathek wird geladen.');
@@ -269,7 +275,7 @@ export async function mount(wurzel, ctx) {
     const trennen = e.target.closest('#m-trennen');
     if (trennen) {
       try {
-        await del('/api/navidrome/credentials');
+        await del('/api/mediathek/connect');
         ok('Konto getrennt');
         zeigeAnmeldung(await get('/api/mediathek/status'));
       } catch (exc) { fail(exc.message); }

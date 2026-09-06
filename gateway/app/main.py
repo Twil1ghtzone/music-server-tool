@@ -173,7 +173,37 @@ for modul in ROUTER:
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("font/woff", ".woff")
 
+
+class Oberflaeche(StaticFiles):
+    """Statische Dateien mit einer Zwischenspeicher-Regel je Art.
+
+    Der Grund ist ein Fehler, der nach einem Update auftrat: die Oberflaeche
+    besteht aus zwei Dutzend ES-Modulen, die der Browser einzeln holt und
+    einzeln zwischenspeichert. Ohne Anweisung entscheidet er je Datei selbst,
+    ob er nachfragt - und laedt nach einem Update ein halb altes, halb neues
+    Gemisch. Das Ergebnis ist keine kaputte Seite, sondern eine Fehlermeldung
+    wie "does not provide an export named …", die aussieht, als sei die
+    Auslieferung defekt.
+
+    Also: Programmcode und Stylesheets muessen bei jedem Aufruf nachfragen
+    (no-cache heisst "zwischenspeichern ja, aber vorher fragen" - bei
+    Unveraendertem antwortet der Server mit 304 und schickt nichts).
+    Schriften dagegen aendern sich nie und duerfen ein Jahr liegen bleiben.
+    """
+
+    UNVERAENDERLICH = ("/fonts/",)
+
+    async def get_response(self, path: str, scope):
+        antwort = await super().get_response(path, scope)
+        pfad = "/" + path.replace("\\", "/").lstrip("/")
+        if any(pfad.startswith(o) for o in self.UNVERAENDERLICH):
+            antwort.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            antwort.headers["Cache-Control"] = "no-cache"
+        return antwort
+
+
 if WEB_ROOT.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")
+    app.mount("/", Oberflaeche(directory=str(WEB_ROOT), html=True), name="web")
 else:  # pragma: no cover
     log.warning("Web-Verzeichnis fehlt: %s", WEB_ROOT)
