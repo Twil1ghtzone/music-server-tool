@@ -131,7 +131,13 @@ async def list_dupes(
     offset: int = Query(0, ge=0),
 ) -> dict:
     seite = await dedupe.groups(state, limit, offset, kind, auto)
-    return {**seite, "summary": await dedupe.summary()}
+    return {
+        **seite,
+        "summary": await dedupe.summary(),
+        # Damit die Oberflaeche den Schutzschalter erklaeren kann, statt den
+        # Knopf anzubieten und dann mit 403 zu antworten.
+        "apply_allowed": settings.allow_dedupe_apply,
+    }
 
 
 @router.get("/dupes/auto")

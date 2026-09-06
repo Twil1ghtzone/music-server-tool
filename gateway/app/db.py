@@ -319,18 +319,36 @@ class Database:
         return conn
 
     async def _migrate(self, conn: aiosqlite.Connection) -> None:
-        await conn.executescript(SCHEMA)
+        """Bringt eine Datenbank auf den aktuellen Stand.
+
+        Die Reihenfolge ist der entscheidende Teil: erst die Schritte fuer
+        bestehende Datenbanken, dann das vollstaendige Schema.
+
+        Andersherum waere es kaputt, und zwar erst beim uebernaechsten Mal:
+        SCHEMA enthaelt "CREATE INDEX … ON media_file(protected)". Auf einer
+        bestehenden Datenbank ist "CREATE TABLE IF NOT EXISTS media_file"
+        wirkungslos - die Spalte fehlt also noch, wenn der Index angelegt
+        werden soll, und der Start bricht ab. Genau das ist beim Update auf
+        Version 4 passiert.
+        """
+        # Nur die Versionstabelle vorziehen: ohne sie ist nicht feststellbar,
+        # womit man es zu tun hat.
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
         cur = await conn.execute("SELECT version FROM schema_version LIMIT 1")
         row = await cur.fetchone()
 
         if row is None:
-            # Frische Datenbank: SCHEMA ist bereits der aktuelle Stand.
-            await conn.execute("INSERT INTO schema_version(version) VALUES (?)", (CURRENT_VERSION,))
-            return
-
-        version = int(row["version"])
-        if version >= CURRENT_VERSION:
-            return
+            # Frisch oder von vor der Versionierung. Gibt es schon Tabellen,
+            # ist es das zweite - dann von Version 1 an nachziehen.
+            cur = await conn.execute(
+                "SELECT COUNT(*) AS n FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'media_file'")
+            bestand = int((await cur.fetchone())["n"]) > 0
+            version = 1 if bestand else CURRENT_VERSION
+            await conn.execute("INSERT INTO schema_version(version) VALUES (?)", (version,))
+        else:
+            version = int(row["version"])
 
         for step in range(version + 1, CURRENT_VERSION + 1):
             for statement in MIGRATIONS.get(step, ()):
@@ -342,7 +360,12 @@ class Database:
                         raise
             log.info("Schema auf Version %d migriert", step)
 
-        await conn.execute("UPDATE schema_version SET version = ?", (CURRENT_VERSION,))
+        # Jetzt das vollstaendige Schema: legt an, was noch fehlt - neue
+        # Tabellen, neue Indizes - und laesst alles Vorhandene in Ruhe.
+        await conn.executescript(SCHEMA)
+
+        if version != CURRENT_VERSION:
+            await conn.execute("UPDATE schema_version SET version = ?", (CURRENT_VERSION,))
 
     async def close(self) -> None:
         for conn in self._all:

@@ -18,9 +18,14 @@ router = APIRouter(prefix="/api", tags=["search"])
 async def search(
     user: dict = Depends(security.current_user),
     q: str = Query(min_length=1, max_length=200),
+    limit: int = Query(100, ge=10, le=200,
+                       description="Wie viele Treffer als Puffer geholt werden"),
 ) -> dict:
-    local_task = asyncio.create_task(navidrome.search_songs(q, count=25))
-    catalog_task = asyncio.create_task(deezer.search_tracks(q, limit=25))
+    # Ein Puffer statt genau einer Bildschirmseite: wer den gesuchten Titel
+    # nicht unter den ersten Treffern sieht, blaettert weiter, ohne dass eine
+    # neue Anfrage noetig waere.
+    local_task = asyncio.create_task(navidrome.search_songs(q, count=limit))
+    catalog_task = asyncio.create_task(deezer.search_tracks(q, limit=limit))
     local, catalog = await asyncio.gather(local_task, catalog_task, return_exceptions=True)
 
     local_rows = local if isinstance(local, list) else []
@@ -34,7 +39,7 @@ async def search(
         artist = deezer.dominant_artist(catalog_rows)
         if artist and not deezer.looks_like(artist, q):
             try:
-                local_rows = await navidrome.search_songs(artist, count=25)
+                local_rows = await navidrome.search_songs(artist, count=limit)
                 if local_rows:
                     corrected = artist
             except Exception as exc:

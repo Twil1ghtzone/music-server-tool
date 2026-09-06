@@ -31,18 +31,24 @@
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  gap: var(--s2);
+  padding: var(--s2);
   min-height: 100dvh;
+  background: var(--bg-deep);
 }
 
+/* Ein eigener Block auf schwarzem Grund statt einer Spalte mit Strich
+ * daneben. Der Abstand trennt besser als jede Linie. */
 .sidebar {
-  position: sticky; top: 0;
-  height: 100dvh;
+  position: sticky; top: var(--s2);
+  height: calc(100dvh - var(--s4));
   display: flex; flex-direction: column;
   gap: var(--s3);
   padding: var(--s4) var(--s3);
   padding-bottom: max(var(--s4), env(safe-area-inset-bottom));
-  background: var(--bg-deep);
-  border-right: 1px solid var(--line);
+  background: var(--bg);
+  border-right: 0;
+  border-radius: var(--r-lg);
   overflow-y: auto;
   /* Schmaler, unaufdringlicher Rollbalken — die Leiste soll ruhig bleiben. */
   scrollbar-width: thin;
@@ -69,7 +75,7 @@
   font-size: var(--t-xs); font-weight: 600; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: var(--track-wide);
 }
-.nav { display: grid; gap: 2px; }
+.nav { display: grid; gap: 3px; }
 .nav a {
   position: relative;
   display: flex; align-items: center; gap: var(--s3);
@@ -78,7 +84,7 @@
   border-radius: var(--r-sm);
   color: var(--text-muted);
   font-size: var(--t-sm);
-  font-weight: 500;
+  font-weight: 600;
   text-decoration: none;
   transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
@@ -86,15 +92,14 @@
 .nav a:hover { background: var(--surface); color: var(--text); }
 .nav a:hover svg { opacity: 1; }
 .nav a[aria-current="page"] {
-  background: var(--accent-soft); color: var(--text-strong); font-weight: 560;
+  background: var(--surface-hi); color: var(--text-strong); font-weight: 650;
 }
 .nav a[aria-current="page"] svg { color: var(--accent); opacity: 1; }
 /* Der Balken links an der aktiven Seite. */
 .nav a[aria-current="page"]::before {
-  content: ""; position: absolute; left: 0; top: 20%; bottom: 20%;
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 22%;
   width: 3px; border-radius: var(--r-pill);
   background: var(--accent);
-  box-shadow: 0 0 12px -1px var(--accent);
 }
 /* Zahl am rechten Rand eines Menuepunkts, etwa offene Auftraege. */
 .nav-count {
@@ -116,9 +121,13 @@
 /* ============================================================== Inhalt */
 .content {
   min-width: 0;                      /* sonst sprengt breiter Inhalt das Raster */
-  padding: var(--s5) var(--s5) var(--s8);
+  padding: var(--s6) var(--s6) var(--s8);
   max-width: var(--content-max);
   width: 100%;
+  background: var(--bg);
+  border-radius: var(--r-lg);
+  /* Der Inhalt scrollt fuer sich, die Seitenleiste steht. */
+  overflow-x: hidden;
 }
 
 .page-head {
@@ -126,7 +135,7 @@
   gap: var(--s4); flex-wrap: wrap;
   margin-bottom: var(--s4);
 }
-.page-head h2 { margin: 0; }
+.page-head h2 { margin: 0; font-size: clamp(1.6rem, 3.5vw, var(--t-3xl)); }
 .page-head .lede { color: var(--text-muted); font-size: var(--t-sm); margin: var(--s1) 0 0; max-width: 62ch; }
 .page-actions { display: flex; gap: var(--s2); flex-wrap: wrap; align-items: center; }
 
@@ -164,13 +173,13 @@
   position: sticky; bottom: 0;
   z-index: var(--z-player);
   display: flex; align-items: center; gap: var(--s3);
-  margin: var(--s5) calc(-1 * var(--s5)) calc(-1 * var(--s8));
-  padding: var(--s3) var(--s5);
+  margin: var(--s5) calc(-1 * var(--s6)) calc(-1 * var(--s8));
+  padding: var(--s3) var(--s6);
   padding-bottom: max(var(--s3), env(safe-area-inset-bottom));
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
-  border-top: 1px solid var(--line-strong);
-  box-shadow: 0 -12px 32px -16px rgb(0 0 0 / 80%);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
 }
 .player[hidden] { display: none !important; }
 .player-art {
@@ -203,8 +212,9 @@
   .sidebar {
     position: sticky; top: 0; height: auto; z-index: var(--z-sticky);
     border-right: 0; border-bottom: 1px solid var(--line);
-    background: color-mix(in srgb, var(--bg-deep) 92%, transparent);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
     backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
   }
   .nav-group { display: none; }
   .nav { grid-auto-flow: column; grid-auto-columns: max-content; overflow-x: auto; gap: var(--s1); }
@@ -213,4 +223,7 @@
   .sidebar-foot { margin-top: var(--s2); }
   .content { padding: var(--s4) var(--s4) var(--s7); }
   .player { margin: var(--s4) calc(-1 * var(--s4)) calc(-1 * var(--s7)); padding-inline: var(--s4); }
+  .shell { gap: 0; padding: 0; }
+  .sidebar { border-radius: 0; height: auto; top: 0; }
+  .content { border-radius: 0; }
 }

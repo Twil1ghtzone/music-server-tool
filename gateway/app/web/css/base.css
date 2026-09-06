@@ -26,8 +26,7 @@ body {
    * bewusst, aber der Grund wirkt dadurch wie eine Flaeche mit Raum
    * dahinter statt wie ein Stueck Farbe. Fest, nicht mitscrollend. */
   background:
-    radial-gradient(1200px 600px at 12% -8%, var(--accent-glow), transparent 60%),
-    radial-gradient(900px 500px at 88% -12%, #ffffff08, transparent 55%),
+    radial-gradient(1400px 700px at 20% -10%, var(--accent-glow), transparent 62%),
     var(--bg);
   background-attachment: fixed;
   min-height: 100vh;
@@ -41,14 +40,14 @@ body {
 h1, h2, h3, h4 {
   margin: 0 0 var(--s2);
   line-height: var(--lh-tight);
-  font-weight: 600;
+  font-weight: var(--w-display);
   letter-spacing: var(--track-tight);
   color: var(--text-strong);
   /* Ueberschriften sollen nicht mit einem Wort umbrechen. */
   text-wrap: balance;
 }
 h1 { font-size: var(--t-2xl); }
-h2 { font-size: var(--t-xl); font-weight: 620; }
+h2 { font-size: var(--t-2xl); }
 /* h3 ist hier keine Ueberschrift im Text, sondern die Beschriftung eines
  * Abschnitts — klein, gesperrt, zurueckhaltend. Das ist die Form, die in
  * technischen Oberflaechen lesbar bleibt, ohne Gewicht zu beanspruchen. */
@@ -94,24 +93,26 @@ input, select, textarea {
   width: 100%;
   min-height: var(--tap-compact);
   padding: var(--s2) var(--s3);
-  background: var(--bg-sunken);
+  /* Gefuellt statt umrandet: ein Feld ist eine Vertiefung, kein Kasten. */
+  background: var(--surface-hi);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
   transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) {
-  border-color: var(--line-strong);
-  background: var(--bg);
+  background: var(--surface-max);
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent-line); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent); background: var(--surface-hi);
+}
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Native Auswahlfelder brauchen im Dunkelmodus ausdrueckliche Farben,
  * sonst zeichnen manche Systeme sie hell. */
 select {
-  background-color: var(--bg-sunken);
+  background-color: var(--surface-hi);
   color: var(--text);
   cursor: pointer;
 }

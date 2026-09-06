@@ -33,6 +33,9 @@ os.environ.setdefault("NAVIDROME_URL", "http://127.0.0.1:4533")
 # Bewusst kein Passwort: das ist der Auslieferungszustand. Der Zugang wird
 # im Dashboard unter Diagnose hinterlegt.
 os.environ.setdefault("DEEMIX_URL", "http://127.0.0.1:6595")
+# Im Entwicklungsstart freigeschaltet, damit sich der ganze Ablauf bis zur
+# Quarantaene pruefen laesst. Im Image steht der Schalter auf "aus".
+os.environ.setdefault("GATEWAY_ALLOW_DEDUPE_APPLY", "true")
 os.environ.setdefault("GATEWAY_ADMIN_USER", "admin")
 os.environ.setdefault("GATEWAY_ADMIN_PASSWORD", "devpassword123")
 os.environ.setdefault("GATEWAY_SESSION_SECRET", "dev" * 20)

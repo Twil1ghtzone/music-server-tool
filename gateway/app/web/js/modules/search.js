@@ -21,6 +21,12 @@ const ARTEN = [
 let letzterBegriff = '';
 let letzteArt = 'track';
 
+// Der geholte Puffer und die Seite, auf der man gerade steht. Beide
+// ueberleben einen Abstecher auf eine Albumseite - man kommt zurueck und
+// steht wieder da, wo man war.
+let puffer = { local: [], catalog: [], corrected: null };
+let seiteNr = 0;
+
 export async function mount(wurzel) {
   wurzel.innerHTML = `
     <div class="page-head">
@@ -56,11 +62,16 @@ export async function mount(wurzel) {
   // das Feld darüber, weil eine Suche eine Anfrage ist und kein Filter.
   const leiste = werkzeugleiste({
     id: 'search',
-    standard: { ansicht: 'raster', anzahl: 40, lokalZuerst: true },
+    standard: { ansicht: 'raster', anzahl: 100, proSeite: 25, cover: true, lokalZuerst: true },
     ansicht: [['raster', '', 'grid'], ['liste', '', 'rows']],
     zusatz: [
-      { name: 'anzahl', art: 'auswahl', zahl: true, label: 'Treffer je Suche',
-        werte: [[20, '20'], [40, '40'], [50, '50']] },
+      { name: 'anzahl', art: 'auswahl', zahl: true, label: 'Puffer je Suche',
+        hinweis: 'So viele Treffer werden auf einmal geholt und dann durchgeblättert',
+        werte: [[50, '50'], [100, '100'], [200, '200']] },
+      { name: 'proSeite', art: 'auswahl', zahl: true, label: 'Treffer je Seite',
+        werte: [[10, '10'], [25, '25'], [50, '50']] },
+      { name: 'cover', art: 'schalter', label: 'Cover an den Titeln',
+        hinweis: 'Ausgeschaltet wird die Liste schmaler und lädt weniger' },
       { name: 'lokalZuerst', art: 'schalter', label: 'Bibliothek zuerst zeigen',
         hinweis: 'Sonst stehen die Katalogtreffer oben' },
     ],
@@ -69,6 +80,10 @@ export async function mount(wurzel) {
         $('#s-catalog .grid-cards')?.classList.toggle('as-list', w.ansicht === 'liste');
       } else if (geaendert === 'lokalZuerst') {
         ordne();
+      } else if (['proSeite', 'cover'].includes(geaendert)) {
+        // Reine Anzeigesachen: der Puffer bleibt, es wird nur neu gezeichnet.
+        seiteNr = 0;
+        zeichneTitel();
       } else if ($('#s-q').value.trim()) {
         suchen();
       }
@@ -96,34 +111,76 @@ export async function mount(wurzel) {
     lokal.innerHTML = '';
 
     try {
-      const d = await get(`/api/search${q({ q: begriff })}`);
-
-      lokal.innerHTML = `<div class="card card-flush">
-        <h3>In der Bibliothek${d.corrected ? ` — zeige „${esc(d.corrected)}“` : ''}</h3>
-        <div class="list">${(d.local || []).length
-          ? d.local.map((s) => `
-              <div class="item">
-                <div class="item-main">
-                  <div class="item-title">${esc(s.artist)} — ${esc(s.title)}</div>
-                  <div class="item-sub">${esc(s.album || '')} · ${esc(s.suffix || '')}${
-                    s.bitRate ? ` ${s.bitRate}&nbsp;kbit/s` : ''}</div>
-                </div>
-                <div class="item-side"><span class="pill pill-ok">lokal</span></div>
-              </div>`).join('')
-          : empty('Nichts in der Bibliothek gefunden.',
-                  d.corrected ? '' : 'Vielleicht liegt der Titel unter anderer Schreibweise vor.')
-        }</div></div>`;
-
-      ziel.innerHTML = (d.catalog || []).length
-        ? `<div class="tracklist">${d.catalog.map((t) =>
-            trackZeile(t, { laeuft: player.laeuft() })).join('')}</div>`
-        : empty('Keine Katalogtreffer.',
-                'Prüfe unter Diagnose, ob der Katalog erreichbar ist.');
-      leiste.setzeZaehler(`${(d.local || []).length} lokal · ${(d.catalog || []).length} im Katalog`);
-      ordne();
+      puffer = await get(`/api/search${q({ q: begriff, limit: leiste.werte().anzahl })}`);
+      seiteNr = 0;
+      zeichneTitel();
     } catch (exc) {
       ziel.innerHTML = failure('Suche fehlgeschlagen.', exc.message);
     }
+  }
+
+  /** Zeichnet lokale Treffer und die aktuelle Seite der Katalogtreffer. */
+  function zeichneTitel() {
+    const ziel = $('#s-catalog');
+    const lokal = $('#s-local');
+    if (!ziel || !lokal) return;
+    const w = leiste.werte();
+    const alle = puffer.catalog || [];
+
+    lokal.innerHTML = `<div class="card card-flush">
+      <h3>In der Bibliothek${puffer.corrected ? ` — zeige „${esc(puffer.corrected)}“` : ''}</h3>
+      <div class="list pad-body">${(puffer.local || []).length
+        ? puffer.local.slice(0, w.proSeite).map((s) => `
+            <div class="item">
+              <div class="item-main">
+                <div class="item-title">${esc(s.artist)} — ${esc(s.title)}</div>
+                <div class="item-sub">${esc(s.album || '')} · ${esc(s.suffix || '')}${
+                  s.bitRate ? ` ${s.bitRate}&nbsp;kbit/s` : ''}</div>
+              </div>
+              <div class="item-side"><span class="pill pill-ok">lokal</span></div>
+            </div>`).join('')
+        : empty('Nichts in der Bibliothek gefunden.',
+                puffer.corrected ? '' : 'Vielleicht liegt der Titel unter anderer Schreibweise vor.')
+      }</div></div>`;
+
+    if (!alle.length) {
+      ziel.innerHTML = empty('Keine Katalogtreffer.',
+                             'Prüfe unter Diagnose, ob der Katalog erreichbar ist.');
+      leiste.setzeZaehler(`${(puffer.local || []).length} lokal`);
+      ordne();
+      return;
+    }
+
+    const seiten = Math.ceil(alle.length / w.proSeite);
+    seiteNr = Math.min(seiteNr, seiten - 1);
+    const von = seiteNr * w.proSeite;
+    const teil = alle.slice(von, von + w.proSeite);
+
+    ziel.innerHTML = `
+      <div class="tracklist">${teil.map((t, i) =>
+        trackZeile(t, { nummer: von + i + 1, laeuft: player.laeuft(), cover: w.cover })).join('')}</div>
+      ${seiten > 1 ? blaettern(seiteNr, seiten) : ''}`;
+
+    leiste.setzeZaehler(
+      `${(puffer.local || []).length} lokal · ${von + 1}–${von + teil.length} von ${alle.length}`);
+    ordne();
+  }
+
+  function blaettern(aktuell, seiten) {
+    const von = Math.max(0, Math.min(aktuell - 3, seiten - 7));
+    const bis = Math.min(seiten, von + 7);
+    return `
+      <nav class="pager" aria-label="Trefferseiten">
+        <button type="button" class="btn btn-sm" data-treffer="${aktuell - 1}"
+                ${aktuell === 0 ? 'disabled' : ''}>Zurück</button>
+        ${von > 0 ? '<span class="pager-luecke">…</span>' : ''}
+        ${Array.from({ length: bis - von }, (_, i) => von + i).map((n) => `
+          <button type="button" class="btn btn-sm ${n === aktuell ? 'btn-primary' : ''}"
+                  data-treffer="${n}" ${n === aktuell ? 'aria-current="page"' : ''}>${n + 1}</button>`).join('')}
+        ${bis < seiten ? '<span class="pager-luecke">…</span>' : ''}
+        <button type="button" class="btn btn-sm" data-treffer="${aktuell + 1}"
+                ${aktuell >= seiten - 1 ? 'disabled' : ''}>Weiter</button>
+      </nav>`;
   }
 
   async function sucheKatalog(begriff, art) {
@@ -188,6 +245,13 @@ export async function mount(wurzel) {
   });
 
   wurzel.addEventListener('click', async (e) => {
+    const trefferSeite = e.target.closest('[data-treffer]');
+    if (trefferSeite) {
+      seiteNr = Number(trefferSeite.dataset.treffer);
+      zeichneTitel();
+      $('#s-catalog')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     const probe = e.target.closest('[data-preview]');
     const laden = e.target.closest('[data-download]');
     if (probe) {

@@ -24,16 +24,19 @@
    * Sechs Stufen statt drei. Der Unterschied zwischen "Karte" und "Zeile
    * darin, ueber der die Maus steht" muss sichtbar sein, ohne dass eine
    * Seite wie ein Schachbrett wirkt — deshalb kleine Schritte.            */
-  --bg-deep:       #05080f;   /* ganz aussen, hinter allem */
-  --bg:            #080d17;   /* Seitengrund */
-  --bg-sunken:     #05090f;   /* Eingaben, Codefelder */
-  --surface:       #0e1526;   /* Karten */
-  --surface-hi:    #141d33;   /* Hover, hervorgehobene Zeilen */
-  --surface-max:   #1b2745;   /* aktive Auswahl */
+  --bg-deep:       #000000;   /* Seitenleiste und Spieler - echtes Schwarz */
+  --bg:            #0b0d12;   /* Seitengrund */
+  --bg-sunken:     #060709;   /* Eingaben, Codefelder */
+  --surface:       #16181d;   /* Karten */
+  --surface-hi:    #1f2229;   /* Hover, hervorgehobene Zeilen */
+  --surface-max:   #2a2e37;   /* aktive Auswahl */
 
-  /* Linien in zwei Staerken: eine, die nur trennt, und eine, die begrenzt. */
-  --line:          #1c2740;
-  --line-strong:   #2c3b5d;
+  /* Linien in zwei Staerken: eine, die nur trennt, und eine, die begrenzt.
+   * Sie werden sparsam eingesetzt: getrennt wird ueber Flaechen, nicht ueber
+   * Striche. Ein Raster aus Rahmen sieht nach Formular aus - eine Flaeche,
+   * die beim Ueberfahren heller wird, sieht nach Musik aus. */
+  --line:          #23262d;
+  --line-strong:   #34383f;
   /* Haarlinie am oberen Rand erhabener Flaechen. Der Trick, der einer
    * Karte Koerper gibt, ohne dass man den Grund fuer Tiefe haelt. */
   --line-top:      #ffffff14;
@@ -41,10 +44,10 @@
   /* --- Schrift ----------------------------------------------------------
    * Vier Stufen. Alles ueber --text-faint hinaus waere auf diesem Grund
    * unter dem Kontrastminimum von 4,5:1.                                  */
-  --text:          #eef3fb;
+  --text:          #f2f3f5;
   --text-strong:   #ffffff;
-  --text-muted:    #9aabc6;
-  --text-faint:    #6b7c99;
+  --text-muted:    #a4a9b4;
+  --text-faint:    #757a85;
 
   /* --- Bedeutungsfarben -------------------------------------------------
    * accent = Navigation und neutrale Hauptaktionen
@@ -55,7 +58,7 @@
   --accent-hover:  #7ba4ff;
   --accent-soft:   #5b8cff1f;   /* Flaeche hinter aktiver Navigation */
   --accent-line:   #5b8cff4d;
-  --accent-glow:   #5b8cff33;
+  --accent-glow:   #5b8cff26;
   --accent-ink:    #04101f;
 
   --go:            #22c55e;
@@ -87,7 +90,9 @@
   --s8: calc(4rem    * var(--raum));
 
   /* --- Radien ------------------------------------------------------------ */
-  --r-xs: 5px;  --r-sm: 8px;  --r: 12px;  --r-lg: 16px;  --r-xl: 22px;
+  /* Groessere Radien als zuvor. Ein 12px-Radius auf einer Karte wirkt
+   * technisch, ein 16er wirkt wie ein Objekt, das man anfassen kann. */
+  --r-xs: 6px;  --r-sm: 10px;  --r: 14px;  --r-lg: 18px;  --r-xl: 24px;
   --r-pill: 999px;
 
   /* --- Tiefe -------------------------------------------------------------
@@ -108,14 +113,18 @@
           Consolas, monospace;
 
   --t-xs: 0.72rem;  --t-sm: 0.8rem;   --t-md: 0.875rem;
-  --t-lg: 1rem;     --t-xl: 1.3rem;   --t-2xl: 1.7rem;  --t-3xl: 2.2rem;
+  --t-lg: 1rem;     --t-xl: 1.5rem;   --t-2xl: 2rem;    --t-3xl: 2.75rem;
+  --t-4xl: 3.5rem;
 
-  --lh-tight: 1.2;
+  --lh-tight: 1.1;
   --lh:       1.6;
 
-  /* Enger gesetzte Ueberschriften wirken gesetzt statt getippt. */
-  --track-tight: -0.02em;
-  --track-wide:  0.08em;
+  /* Ueberschriften sind schwer und eng gesetzt. Das ist der auffaelligste
+   * Unterschied zu einer Verwaltungsoberflaeche: dort ist eine Ueberschrift
+   * fetter Text, hier ist sie ein Schild. */
+  --w-display: 750;
+  --track-tight: -0.03em;
+  --track-wide:  0.1em;
 
   /* --- Bewegung ----------------------------------------------------------
    * 120-320 ms. Nie "all" animieren, sondern die konkrete Eigenschaft.    */
@@ -131,10 +140,10 @@
 
   /* --- Masse -------------------------------------------------------------- */
   --sidebar-w: 15.5rem;
-  --content-max: 88rem;
+  --content-max: 96rem;
   --tap: 2.75rem;          /* 44px Mindestgroesse fuer Beruehrziele */
   --tap-compact: 2.25rem;
-  --cover: 168px;          /* Kantenlaenge im Cover-Raster */
+  --cover: 190px;          /* Kantenlaenge im Cover-Raster */
 }
 
 /* --- Dichte ---------------------------------------------------------------
@@ -142,7 +151,7 @@
  * Beruehrziele schrumpfen dabei nicht unter das Minimum — Dichte darf die
  * Bedienbarkeit nicht kosten.                                              */
 :root[data-dichte="kompakt"] { --raum: 0.8; --t-md: 0.84rem; --lh: 1.5; }
-:root[data-dichte="luftig"]  { --raum: 1.25; --lh: 1.7; --cover: 190px; }
+:root[data-dichte="luftig"]  { --raum: 1.25; --lh: 1.7; --cover: 220px; }
 
 /* --- Akzentfarbe ----------------------------------------------------------
  * Nur die Navigations- und Hauptaktionsfarbe wechselt. Gruen (loslegen),

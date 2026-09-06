@@ -69,7 +69,7 @@ function zeichne(state = {}) {
       <div class="player-title">${esc(t.title)}</div>
       <div class="player-sub">${esc(t.artist || '')}</div>
     </div>
-    <span class="player-note">Hörprobe, 30&nbsp;s</span>
+    <span class="player-note">${t.src ? 'aus deiner Bibliothek' : 'Hörprobe, 30&nbsp;s'}</span>
     <button class="btn btn-icon btn-ghost" data-player-stop aria-label="Hörprobe beenden">
       ${icon('close')}
     </button>`;
@@ -89,11 +89,19 @@ export function onChange(handler) {
   return () => beobachter.delete(handler);
 }
 
+/**
+ * Spielt eine Hörprobe oder eine lokale Datei.
+ *
+ * Ohne `src` ist es ein Katalogtitel: 30 Sekunden über den Gateway. Mit
+ * `src` ist es eine Datei aus der eigenen Bibliothek — dann läuft sie ganz,
+ * denn genau dafür ist sie da: zwei Duplikate nebeneinander anhören und
+ * hören, ob es einen Unterschied gibt.
+ */
 export function play(track) {
   bau();
   if (laufenderTitel?.id === track.id) return stop();   // erneuter Klick = anhalten
   laufenderTitel = track;
-  audio.src = `/api/catalog/preview/${encodeURIComponent(track.id)}`;
+  audio.src = track.src || `/api/catalog/preview/${encodeURIComponent(track.id)}`;
   audio.play().catch(() => {
     // Wird der Aufruf nicht durch eine Nutzeraktion ausgelöst, blockt der
     // Browser. Dann lieber sagen als still scheitern.

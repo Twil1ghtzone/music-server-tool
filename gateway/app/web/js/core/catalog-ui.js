@@ -46,12 +46,24 @@ export function trackAktion(track) {
     data-download="${esc(track.provider_id)}">${beschriftung}</button>`;
 }
 
-/** Zeile einer Titelliste, mit Hörprobe und Ladeknopf. */
-export function trackZeile(track, { nummer = null, laeuft = null } = {}) {
+/**
+ * Zeile einer Titelliste, mit Hörprobe und Ladeknopf.
+ *
+ * `cover: true` blendet das Albumbild vor der Zeile ein. In einer Albumliste
+ * wäre es überflüssig — dort ist es für alle Titel dasselbe und steht schon
+ * im Kopf. In einer Trefferliste dagegen ist es das, woran man einen Titel
+ * erkennt, lange bevor man den Namen gelesen hat.
+ */
+export function trackZeile(track, { nummer = null, laeuft = null, cover = false } = {}) {
   const spielt = laeuft && String(laeuft) === String(track.provider_id);
+  const bild = cover ? coverUrl(track.md5_image, 'cover', 120) : null;
   return `
-    <div class="track ${spielt ? 'is-playing' : ''}" data-track="${esc(track.provider_id)}">
+    <div class="track ${cover ? 'has-art' : ''} ${spielt ? 'is-playing' : ''}"
+         data-track="${esc(track.provider_id)}">
       <span class="track-no">${nummer ?? track.track_no ?? ''}</span>
+      ${cover ? `<span class="track-art">${bild
+        ? `<img src="${esc(bild)}" alt="" width="44" height="44" loading="lazy" decoding="async">`
+        : ''}</span>` : ''}
       <div class="track-main">
         <div class="item-title track-title">${esc(track.title)}</div>
         <div class="item-sub">${esc(track.artist)}${

@@ -73,6 +73,11 @@ def normalize(track: dict[str, Any]) -> dict[str, Any]:
         "year": _year(track.get("release_date") or album.get("release_date")),
         "isrc": track.get("isrc"),
         "cover_url": album.get("cover_medium") or album.get("cover") or None,
+        # Die Pruefsumme des Albumbildes. Damit kann die Oberflaeche das Cover
+        # ueber den eigenen Server holen, statt eine fremde URL zu laden -
+        # die Content-Security-Policy steht auf 'self'.
+        "md5_image": album.get("md5_image") or _md5_aus_bild(
+            album.get("cover_medium") or album.get("cover_big") or album.get("cover")),
         "source_url": track.get("link") or f"https://www.deezer.com/track/{track.get('id')}",
         "explicit": bool(track.get("explicit_lyrics")),
         "rank": int(track.get("rank") or 0),
@@ -149,23 +154,44 @@ def _year(value: str | None) -> int | None:
         return None
 
 
+# Deezer liefert hoechstens 50 Treffer je Anfrage. Wer mehr will, blaettert
+# ueber "index" weiter.
+SEITE = 50
+
+
 async def search_tracks(query: str, limit: int | None = None) -> list[dict[str, Any]]:
+    """Titeltreffer, notfalls ueber mehrere Anfragen zusammengesucht.
+
+    Der Sinn eines groesseren Puffers: wer den gesuchten Titel nicht unter
+    den ersten Treffern findet, soll blaettern koennen, statt die Suche neu
+    zu formulieren. Die Seiten werden hier einmal geholt und danach in der
+    Oberflaeche durchgeblaettert - nicht eine Anfrage je Seite.
+    """
     limit = limit or settings.provider_result_limit
     query = query.strip()
     if not query:
         return []
 
     async def _fetch() -> list[dict[str, Any]]:
-        try:
-            resp = await http.deezer().get(
-                "/search", params={"q": query, "limit": min(limit, 50), "order": "RANKING"}
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            log.warning("Deezer-Suche fehlgeschlagen (%s): %s", query, exc)
-            return []
-        return [normalize(t) for t in (data.get("data") or []) if t.get("readable", True)]
+        treffer: list[dict[str, Any]] = []
+        for index in range(0, limit, SEITE):
+            try:
+                resp = await http.deezer().get(
+                    "/search",
+                    params={"q": query, "limit": min(SEITE, limit - index),
+                            "index": index, "order": "RANKING"},
+                )
+                resp.raise_for_status()
+                daten = resp.json()
+            except Exception as exc:
+                log.warning("Deezer-Suche fehlgeschlagen (%s, ab %s): %s", query, index, exc)
+                break
+            seite = [normalize(t) for t in (daten.get("data") or []) if t.get("readable", True)]
+            treffer.extend(seite)
+            # Weniger als eine volle Seite heisst: das war alles.
+            if len(daten.get("data") or []) < SEITE:
+                break
+        return treffer
 
     return await _cached(f"search:{limit}:{query.lower()}", _fetch)
 
