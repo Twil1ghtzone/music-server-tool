@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .. import security
@@ -12,7 +13,16 @@ from ..config import settings
 from ..db import db
 from ..events import emit
 from ..logging_conf import get_logger
-from ..services import dedupe, jobs, scanner, tags
+from ..clients import http, navidrome
+from ..services import dedupe, jobs, protection, scanner, tags
+
+# Was der Browser zum Abspielen braucht. Alles andere geht als
+# Bytestrom raus - der Browser sagt dann selbst, dass er es nicht kann.
+MIME = {
+    ".flac": "audio/flac", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+    ".aac": "audio/aac", ".ogg": "audio/ogg", ".opus": "audio/ogg",
+    ".wav": "audio/wav", ".aiff": "audio/aiff", ".wma": "audio/x-ms-wma",
+}
 
 log = get_logger("api.library")
 router = APIRouter(prefix="/api/library", tags=["library"])
@@ -115,9 +125,24 @@ async def files(
 async def list_dupes(
     user: dict = Depends(security.admin_only),
     state: str = Query("open", pattern="^(open|applied|ignored)$"),
-    limit: int = Query(100, le=300),
+    kind: str = Query("alle", pattern="^(alle|exact|audio|acoustic)$"),
+    auto: bool = Query(False, description="Nur Gruppen, die eindeutig sind"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ) -> dict:
-    return {"groups": await dedupe.groups(state, limit), "summary": await dedupe.summary()}
+    seite = await dedupe.groups(state, limit, offset, kind, auto)
+    return {**seite, "summary": await dedupe.summary()}
+
+
+@router.get("/dupes/auto")
+async def dupes_auto(user: dict = Depends(security.admin_only)) -> dict:
+    """Die Gruppen, bei denen der Scanner sich selbst sicher ist.
+
+    Getrennt vom Listenendpunkt, weil die Oberflaeche sie ueber alle Seiten
+    hinweg auswaehlen koennen muss - nicht nur die gerade sichtbaren.
+    """
+    ids = await dedupe.auto_gruppen()
+    return {"groups": ids, "count": len(ids)}
 
 
 @router.post("/dupes/find")
@@ -178,6 +203,172 @@ async def restore_group(group_id: int, user: dict = Depends(security.guarded_adm
     restored = await dedupe.restore(group_id)
     await emit(f"{restored} Datei(en) aus der Quarantaene zurueckgeholt", category="dedupe")
     return {"restored": restored}
+
+
+# ------------------------------------------------------------ Quarantaene
+class FristBody(BaseModel):
+    days: int = Field(ge=dedupe.QUARANTAENE_TAGE_MIN, le=dedupe.QUARANTAENE_TAGE_MAX)
+
+
+@router.get("/quarantine")
+async def quarantine_list(
+    user: dict = Depends(security.admin_only),
+    state: str = Query("held", pattern="^(held|restored|purged|lost)$"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    return await dedupe.quarantaene(state, limit, offset)
+
+
+@router.post("/quarantine/days")
+async def quarantine_days(
+    body: FristBody, user: dict = Depends(security.guarded_admin)
+) -> dict:
+    """Die Frist gilt fuer kuenftige Verschiebungen.
+
+    Was schon in der Quarantaene liegt, traegt sein eigenes Ablaufdatum in
+    der Zeile - eine verlaengerte Frist belebt also nichts wieder, das schon
+    zur Loeschung freigegeben war.
+    """
+    return {"days": await dedupe.setze_quarantaene_tage(body.days)}
+
+
+@router.post("/quarantine/{item_id}/restore")
+async def quarantine_restore(
+    item_id: int, user: dict = Depends(security.guarded_admin)
+) -> dict:
+    if not await dedupe.restore_item(item_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Zurueckholen nicht moeglich - die Datei ist weg oder der Platz ist belegt.")
+    await emit("Datei aus der Quarantaene zurueckgeholt", category="dedupe")
+    return {"ok": True}
+
+
+@router.post("/quarantine/purge")
+async def quarantine_purge(user: dict = Depends(security.guarded_admin)) -> dict:
+    """Loescht jetzt, was ohnehin faellig waere. Nicht mehr."""
+    job_id = await jobs.enqueue(
+        jobs.PURGE_QUARANTINE, priority=jobs.PRIORITY_NORMAL, dedupe_key="quarantine:purge")
+    return {"job": job_id}
+
+
+# ------------------------------------------------- Schutz vor Nutzerdaten
+@router.get("/protection")
+async def protection_state(user: dict = Depends(security.admin_only)) -> dict:
+    return await protection.stand()
+
+
+@router.post("/protection/sync")
+async def protection_sync(user: dict = Depends(security.guarded_admin)) -> dict:
+    job_id = await jobs.enqueue(
+        jobs.SYNC_PROTECTION, priority=jobs.PRIORITY_NORMAL, dedupe_key="protection:sync")
+    return {"job": job_id}
+
+
+# ------------------------------------------- Cover und Hoerprobe je Datei
+# Damit man ein Duplikat pruefen kann, ohne es herunterzuladen: das Cover
+# zeigen und hineinhoeren. Beides holt der Gateway mit seinen eigenen
+# Navidrome-Zugangsdaten - das Dashboard hat keine Subsonic-Sitzung.
+
+async def _nd_datei(file_id: int) -> dict:
+    zeile = await db.fetch_one(
+        "SELECT id, nd_id, path, title, artist, album FROM media_file WHERE id = ?", (file_id,))
+    if not zeile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Datei nicht im Index")
+    if not zeile.get("nd_id"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Diese Datei ist Navidrome noch nicht zugeordnet. Unter Duplikate "
+            "einmal „Mit Navidrome abgleichen“ ausführen.")
+    return zeile
+
+
+@router.get("/files/{file_id}/cover")
+async def file_cover(
+    file_id: int, user: dict = Depends(security.current_user), s: int = Query(160, ge=32, le=1000)
+) -> Response:
+    zeile = await _nd_datei(file_id)
+    params = await navidrome._credentials()
+    params.update({"id": str(zeile["nd_id"]), "size": str(s)})
+    try:
+        antwort = await http.navidrome().get("/rest/getCoverArt.view", params=params, timeout=15.0)
+        antwort.raise_for_status()
+    except Exception as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Cover nicht verfuegbar") from exc
+
+    typ = antwort.headers.get("content-type", "")
+    if not typ.startswith("image/"):
+        # Navidrome antwortet bei einem Fehler mit einer Subsonic-Meldung,
+        # nicht mit einem Bild. Die als Cover durchzureichen waere ein
+        # kaputtes Bild ohne Erklaerung.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kein Cover hinterlegt")
+    return Response(
+        antwort.content, media_type=typ,
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.get("/files/{file_id}/stream")
+async def file_stream(file_id: int, request: Request,
+                      user: dict = Depends(security.current_user)) -> StreamingResponse:
+    """Reicht die Datei zum Probehoeren durch.
+
+    Mit Bereichsanfragen, damit der Browser springen kann - ohne das laedt
+    er beim Vorspulen jedes Mal von vorn.
+    """
+    zeile = await db.fetch_one("SELECT path FROM media_file WHERE id = ?", (file_id,))
+    if not zeile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Datei nicht im Index")
+    pfad = Path(zeile["path"])
+    # Der Pfad kommt aus dem eigenen Index, aber geprueft wird trotzdem:
+    # ein Eintrag ausserhalb der Bibliothek waere ein Weg, beliebige Dateien
+    # des Servers auszulesen.
+    try:
+        pfad.resolve().relative_to(settings.music_dir.resolve())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Pfad ausserhalb der Bibliothek") from exc
+    if not pfad.exists():
+        raise HTTPException(status.HTTP_410_GONE, "Datei liegt nicht mehr an diesem Pfad")
+
+    groesse = pfad.stat().st_size
+    typ = MIME.get(pfad.suffix.lower(), "application/octet-stream")
+    start, ende = 0, groesse - 1
+    bereich = request.headers.get("range", "")
+    if bereich.startswith("bytes="):
+        roh = bereich[6:].split("-", 1)
+        try:
+            if roh[0]:
+                start = int(roh[0])
+            if len(roh) > 1 and roh[1]:
+                ende = min(int(roh[1]), groesse - 1)
+        except ValueError:
+            start, ende = 0, groesse - 1
+    if start > ende or start >= groesse:
+        raise HTTPException(status.HTTP_416_REQUESTED_RANGE_NOT_SATISFIABLE, "Bereich ungueltig")
+
+    laenge = ende - start + 1
+
+    def lies():
+        with pfad.open("rb") as f:
+            f.seek(start)
+            rest = laenge
+            while rest > 0:
+                brocken = f.read(min(65536, rest))
+                if not brocken:
+                    return
+                rest -= len(brocken)
+                yield brocken
+
+    kopf = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(laenge),
+        "Cache-Control": "private, max-age=3600",
+    }
+    if bereich:
+        kopf["Content-Range"] = f"bytes {start}-{ende}/{groesse}"
+    return StreamingResponse(lies(), status_code=206 if bereich else 200,
+                             media_type=typ, headers=kopf)
 
 
 # ------------------------------------------------------------------ Tags

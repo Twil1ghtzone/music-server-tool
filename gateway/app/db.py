@@ -154,6 +154,14 @@ CREATE TABLE IF NOT EXISTS media_file (
     has_cover    INTEGER NOT NULL DEFAULT 0,
     tag_issues   TEXT,
     missing      INTEGER NOT NULL DEFAULT 0,
+    -- Geschuetzt heisst: Navidrome haengt Nutzerdaten daran - die Datei steht
+    -- in einer Playlist, ist favorisiert oder bewertet. Der Duplikatscanner
+    -- darf sie vorschlagen, aber nie zum Entfernen auswaehlen.
+    protected    INTEGER NOT NULL DEFAULT 0,
+    protect_why  TEXT,
+    -- Navidromes eigene media_file-ID. Damit lassen sich Cover und Stream
+    -- fuer eine lokale Datei abrufen, ohne sie selbst zu dekodieren.
+    nd_id        TEXT,
     seen_at      TEXT NOT NULL DEFAULT (datetime('now')),
     hashed_at    TEXT,
     probed_at    TEXT
@@ -162,6 +170,8 @@ CREATE INDEX IF NOT EXISTS ix_media_file_hash ON media_file(file_hash);
 CREATE INDEX IF NOT EXISTS ix_media_audio_hash ON media_file(audio_hash);
 CREATE INDEX IF NOT EXISTS ix_media_size ON media_file(size);
 CREATE INDEX IF NOT EXISTS ix_media_missing ON media_file(missing);
+CREATE INDEX IF NOT EXISTS ix_media_protected ON media_file(protected);
+CREATE INDEX IF NOT EXISTS ix_media_nd ON media_file(nd_id);
 CREATE INDEX IF NOT EXISTS ix_media_artist_title ON media_file(artist, title);
 
 CREATE TABLE IF NOT EXISTS fingerprint (
@@ -182,6 +192,10 @@ CREATE TABLE IF NOT EXISTS dupe_group (
     files      INTEGER NOT NULL DEFAULT 0,
     wasted     INTEGER NOT NULL DEFAULT 0,
     state      TEXT NOT NULL DEFAULT 'open',
+    -- Traut sich der Scanner eine Auswahl selbst zu? 1 = eindeutig
+    -- (etwa "… (2).flac" neben "….flac"), 0 = der Mensch entscheidet.
+    auto_ok    INTEGER NOT NULL DEFAULT 0,
+    auto_why   TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(kind, signature)
 );
@@ -194,6 +208,29 @@ CREATE TABLE IF NOT EXISTS dupe_member (
     similarity    REAL,
     PRIMARY KEY (group_id, media_file_id)
 );
+
+-- Was in der Quarantaene liegt und wann es endgueltig verschwindet.
+-- Ohne diese Tabelle waere der Ordner eine Halde: man sieht Dateien, aber
+-- nicht, woher sie kamen, wann sie kamen und wohin sie zurueckgehoeren.
+CREATE TABLE IF NOT EXISTS quarantine_item (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_path TEXT NOT NULL,
+    stored_path   TEXT NOT NULL,
+    media_file_id INTEGER REFERENCES media_file(id) ON DELETE SET NULL,
+    group_id      INTEGER,
+    size          INTEGER NOT NULL DEFAULT 0,
+    reason        TEXT,
+    moved_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    -- Zeitpunkt, ab dem endgueltig geloescht werden darf. Steht als
+    -- absoluter Wert in der Zeile, nicht als Frist in der Konfiguration:
+    -- wer die Frist spaeter verlaengert, soll damit nichts wiederbeleben,
+    -- was schon zur Loeschung freigegeben war.
+    purge_at      TEXT NOT NULL,
+    state         TEXT NOT NULL DEFAULT 'held',
+    purged_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_quarantine_purge ON quarantine_item(state, purge_at);
+CREATE INDEX IF NOT EXISTS ix_quarantine_group ON quarantine_item(group_id);
 
 -- ------------------------------------------------------------ Betrieb/Logs
 CREATE TABLE IF NOT EXISTS event_log (
@@ -212,7 +249,7 @@ CREATE TABLE IF NOT EXISTS setting (
 );
 """
 
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 
 # Schritte fuer bereits bestehende Datenbanken. SCHEMA legt neue Datenbanken
 # gleich vollstaendig an, deshalb laufen diese Schritte nur bei aelteren.
@@ -226,6 +263,30 @@ MIGRATIONS: dict[int, tuple[str, ...]] = {
         "ALTER TABLE app_user ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
         # Wer vor der Rollenverwaltung existierte, konnte alles - das bleibt so.
         "UPDATE app_user SET role = 'admin'",
+    ),
+    4: (
+        "ALTER TABLE media_file ADD COLUMN protected INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE media_file ADD COLUMN protect_why TEXT",
+        "ALTER TABLE media_file ADD COLUMN nd_id TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_media_protected ON media_file(protected)",
+        "CREATE INDEX IF NOT EXISTS ix_media_nd ON media_file(nd_id)",
+        "ALTER TABLE dupe_group ADD COLUMN auto_ok INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE dupe_group ADD COLUMN auto_why TEXT",
+        """CREATE TABLE IF NOT EXISTS quarantine_item (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            original_path TEXT NOT NULL,
+            stored_path   TEXT NOT NULL,
+            media_file_id INTEGER REFERENCES media_file(id) ON DELETE SET NULL,
+            group_id      INTEGER,
+            size          INTEGER NOT NULL DEFAULT 0,
+            reason        TEXT,
+            moved_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            purge_at      TEXT NOT NULL,
+            state         TEXT NOT NULL DEFAULT 'held',
+            purged_at     TEXT
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_quarantine_purge ON quarantine_item(state, purge_at)",
+        "CREATE INDEX IF NOT EXISTS ix_quarantine_group ON quarantine_item(group_id)",
     ),
 }
 

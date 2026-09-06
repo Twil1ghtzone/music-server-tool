@@ -321,6 +321,49 @@ async def library_stats() -> dict[str, Any]:
     return out
 
 
+# --------------------------------------------------- Was Nutzer angefasst haben
+# Der Duplikatscanner darf keine Datei entfernen, an der Navidrome Nutzerdaten
+# haengen: sie steht in einer Playlist, ist favorisiert oder bewertet. Diese
+# Historie haengt an Navidromes media_file-ID - verschwindet die Datei,
+# verschwindet sie mit, und in der Playlist reisst ein Loch.
+
+async def playlists() -> list[dict]:
+    body = await call("getPlaylists")
+    return (body.get("playlists") or {}).get("playlist") or []
+
+
+async def playlist_songs(playlist_id: str) -> list[dict]:
+    body = await call("getPlaylist", {"id": playlist_id})
+    return (body.get("playlist") or {}).get("entry") or []
+
+
+async def starred_songs() -> list[dict]:
+    """Favorisierte Titel. getStarred2 ist der einzige Endpunkt, der sie
+    vollstaendig und billig liefert."""
+    body = await call("getStarred2")
+    return (body.get("starred2") or {}).get("song") or []
+
+
+async def iter_songs(page_size: int = 500, max_songs: int = 200_000):
+    """Laeuft einmal ueber alle Titel, seitenweise.
+
+    Bewertungen haben keinen eigenen Endpunkt - sie stehen als "userRating"
+    am Titel selbst. Also einmal durch, statt zu raten. Eine leere Suche
+    liefert bei Navidrome alles; die Seitengroesse haelt den Speicher flach,
+    egal wie gross die Bibliothek ist.
+    """
+    offset = 0
+    while offset < max_songs:
+        seite = await search_songs('""', count=page_size, offset=offset)
+        if not seite:
+            return
+        for song in seite:
+            yield song
+        if len(seite) < page_size:
+            return
+        offset += page_size
+
+
 # ------------------------------------------------------- Credential-Check
 async def verify_client_credentials(params: dict[str, str]) -> bool:
     """Prueft die vom Client mitgeschickten Subsonic-Zugangsdaten, indem sie

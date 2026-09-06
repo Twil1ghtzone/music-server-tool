@@ -25,6 +25,8 @@ HASH_FILES = "hash_files"
 FINGERPRINT = "fingerprint"
 FIND_DUPES = "find_dupes"
 APPLY_DUPES = "apply_dupes"
+PURGE_QUARANTINE = "purge_quarantine"   # Frist abgelaufen, endgueltig loeschen
+SYNC_PROTECTION = "sync_protection"     # Playlists, Favoriten, Bewertungen holen
 
 ACTIVE_STATES = ("pending", "running")
 

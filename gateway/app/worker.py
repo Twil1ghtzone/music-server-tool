@@ -19,7 +19,7 @@ from .errors import PermanentError
 from .events import emit, prune as prune_events
 from .logging_conf import get_logger, setup_logging
 from .security import prune_attempts, prune_sessions
-from .services import dedupe, downloader, jobs, scanner
+from .services import dedupe, downloader, jobs, protection, scanner
 
 log = get_logger("worker")
 
@@ -35,6 +35,8 @@ HANDLERS: dict[str, Handler] = {
     jobs.FINGERPRINT: scanner.handle_fingerprint,
     jobs.FIND_DUPES: dedupe.handle_find_dupes,
     jobs.APPLY_DUPES: dedupe.handle_apply,
+    jobs.PURGE_QUARANTINE: dedupe.handle_purge,
+    jobs.SYNC_PROTECTION: protection.handle_sync,
 }
 
 IDLE_SLEEP = 1.5
@@ -107,6 +109,19 @@ async def maintenance() -> None:
                     jobs.IMPORT_STAGING,
                     priority=jobs.PRIORITY_BACKGROUND,
                     dedupe_key="import:staging",
+                )
+
+            # Abgelaufene Quarantaene aufraeumen. Der Job prueft selbst, ob
+            # etwas faellig ist, und meldet sonst nichts - deshalb kann er
+            # bedenkenlos in jedem Wartungslauf mitfahren.
+            faellig = await db.fetch_one(
+                "SELECT COUNT(*) AS n FROM quarantine_item "
+                "WHERE state = 'held' AND purge_at <= datetime('now')")
+            if faellig and int(faellig["n"]) > 0:
+                await jobs.enqueue(
+                    jobs.PURGE_QUARANTINE,
+                    priority=jobs.PRIORITY_BACKGROUND,
+                    dedupe_key="quarantine:purge",
                 )
         except Exception as exc:  # pragma: no cover
             log.warning("Wartungslauf fehlgeschlagen: %s", exc)

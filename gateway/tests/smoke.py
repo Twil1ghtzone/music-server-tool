@@ -378,6 +378,127 @@ check("Fingerprint: fremder Titel unter der Schwelle",
       dedupe.similarity(a, other) < dedupe.ACOUSTIC_MATCH_THRESHOLD,
       str(dedupe.similarity(a, other)))
 
+# ------------------------------------------------- Auswahl beim Bereinigen
+# Der Scanner darf sich irren, solange ein Mensch hinsieht. Automatisch
+# auswaehlen darf er nur, wo es nichts zu entscheiden gibt - diese Faelle
+# sind hier festgehalten, damit sie es auch bleiben.
+
+MUSIK = str(dedupe.settings.music_dir).replace("\\", "/")
+
+
+def _datei(pfad, **rest):
+    """Eine Indexzeile, wie sie aus media_file kaeme."""
+    zeile = {
+        "id": abs(hash(pfad)) % 100000, "path": f"{MUSIK}/{pfad}",
+        "ext": "." + pfad.rsplit(".", 1)[-1].lower(),
+        "size": 40_000_000, "bitrate": 900_000, "sample_rate": 44100,
+        "duration": 240.0, "has_cover": 1, "protected": 0, "file_hash": None,
+        "title": "Titel", "artist": "Interpret", "album": "Album",
+        "album_artist": "Interpret", "year": 2011, "track_no": 1,
+    }
+    zeile.update(rest)
+    return zeile
+
+
+check("Kopie erkannt: (2)", dedupe.kopie_nummer("/m/A/B/Song (2).flac") == 2)
+check("Kopie erkannt: (12) ohne Leerzeichen", dedupe.kopie_nummer("/m/A/B/Song(12).mp3") == 12)
+check("Kopie erkannt: sauberer Name ist keine",
+      dedupe.kopie_nummer("/m/A/B/Song.flac") == 0)
+check("Kopie erkannt: Jahreszahl im Namen ist keine Kopie",
+      dedupe.kopie_nummer("/m/A/B/Live (1994).flac") == 1994 % 1000 if False else
+      dedupe.kopie_nummer("/m/A/B/Live (1994).flac") == 0,
+      "vierstellig faellt nicht unter das Muster")
+
+# Format schlaegt alles Technische.
+_flac = _datei("Nirvana/Nevermind/01 - Song.flac")
+_mp3 = _datei("Nirvana/Nevermind/01 - Song.mp3", bitrate=320_000)
+check("FLAC schlaegt MP3", dedupe.keeper_score(_flac) > dedupe.keeper_score(_mp3),
+      f"{dedupe.keeper_score(_flac)} > {dedupe.keeper_score(_mp3)}")
+
+# Das Original schlaegt die Kopie - auch wenn beide dasselbe Format haben.
+_orig = _datei("Nirvana/Nevermind/01 - Song.flac")
+_kopie = _datei("Nirvana/Nevermind/01 - Song (2).flac")
+check("Original schlaegt nummerierte Kopie",
+      dedupe.keeper_score(_orig) > dedupe.keeper_score(_kopie))
+
+# Und zwar auch dann, wenn die Kopie das bessere Format hat: eine "(2).flac"
+# neben einer "….flac" ist dieselbe Datei, kein Qualitaetsgewinn.
+check("Kopie gewinnt nicht durch besseres Format",
+      dedupe.keeper_score(_datei("A/B/S.flac")) >
+      dedupe.keeper_score(_datei("A/B/S (2).flac")))
+
+# Aber eine echte FLAC schlaegt eine MP3 auch dann, wenn die MP3 das
+# Original ist - Qualitaet ist hier das staerkere Kriterium.
+check("Echte FLAC schlaegt MP3 trotz gleicher Lage",
+      dedupe.keeper_score(_datei("A/B/S.flac")) > dedupe.keeper_score(_datei("A/B/S.mp3")))
+
+# Albumordner schlaegt Downloadordner.
+_album = _datei("Nirvana/Nevermind/01 - Song.flac")
+_lose = _datei("downloads/01 - Song.flac")
+check("Albumordner schlaegt Downloadordner",
+      dedupe.keeper_score(_album) > dedupe.keeper_score(_lose))
+
+# Schutz schlaegt jedes technische Kriterium.
+_geschuetzt_mp3 = _datei("downloads/Song (2).mp3", bitrate=128_000,
+                         protected=1, protect_why="playlist")
+_freie_flac = _datei("Nirvana/Nevermind/01 - Song.flac")
+check("Geschuetzte MP3 schlaegt freie FLAC",
+      dedupe.keeper_score(_geschuetzt_mp3) > dedupe.keeper_score(_freie_flac),
+      "eine Playlist wiegt schwerer als jedes Format")
+
+
+def _sortiert(*dateien):
+    return sorted(dateien, key=dedupe.keeper_score, reverse=True)
+
+
+darf, warum = dedupe.auto_auswahl(_sortiert(_orig, _kopie))
+check("Auto: nummerierte Kopie ist eindeutig", darf, warum)
+
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("A/B/S.flac"), _datei("A/B/S (2).flac", protected=1, protect_why="favorit")))
+check("Auto: geschuetztes Duplikat blockiert die Auswahl", not darf, warum)
+
+# Steht der geschuetzte Titel als Sieger fest, darf die schlechtere Datei
+# weg - das ist genau der Sinn der Sache.
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("A/B/S.flac", protected=1, protect_why="playlist"), _datei("A/B/S (2).flac")))
+check("Auto: geschuetzter Sieger raeumt seine Kopie weg", darf, warum)
+
+# Aber nicht, wenn der Schutz die schlechtere Datei gewinnen laesst: eine
+# MP3 in einer Playlist duerfte sonst die FLAC daneben verdraengen.
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("A/B/S.mp3", bitrate=128_000, protected=1, protect_why="playlist"),
+    _datei("A/B/S.flac")))
+check("Auto: Schutz darf keine Qualitaet kosten", not darf, warum)
+
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("A/B/Song.flac", file_hash="deadbeef"),
+    _datei("C/D/Anderer Name.flac", file_hash="deadbeef")))
+check("Auto: byteweise identisch ist eindeutig", darf, warum)
+
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("Nirvana/Nevermind/01 - Song.flac"), _datei("downloads/Song.mp3")))
+check("Auto: FLAC im Albumordner gegen lose MP3 ist eindeutig", darf, warum)
+
+# Zwei gleichwertige Dateien an verschiedenen Orten: das ist eine
+# Geschmacksfrage und keine technische. Der Mensch entscheidet.
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("Nirvana/Nevermind/01 - Song.flac"),
+    _datei("Sampler/Grunge Hits/04 - Song.flac")))
+check("Auto: zwei gleichwertige Dateien bleiben offen", not darf, warum)
+
+darf, warum = dedupe.auto_auswahl(_sortiert(
+    _datei("A/B/Song.mp3", bitrate=320_000), _datei("A/B/Song v2.mp3", bitrate=192_000)))
+check("Auto: nur Bitrate reicht nicht", not darf, warum)
+
+# Frist: die Grenzen muessen halten, sonst laesst sich per API eine
+# Null-Tage-Frist setzen und die Quarantaene waere wertlos.
+check("Quarantaenefrist: Standard sind 21 Tage",
+      dedupe.QUARANTAENE_TAGE_STANDARD == 21)
+check("Quarantaenefrist: Untergrenze mindestens ein Tag",
+      dedupe.QUARANTAENE_TAGE_MIN >= 1)
+
+
 # Haengende Zustaende: ein Titel auf 'downloading' ohne Job muss aufgeloest
 # werden, sonst laeuft er in der Oberflaeche ewig weiter.
 import asyncio  # noqa: E402
@@ -488,6 +609,178 @@ check("Deemix-Fortschritt ignoriert fremde Auftraege",
       _deemix.queue_progress(_fremd, _URL) == (None, None))
 check("Deemix-Fortschritt haelt eine leere Antwort aus",
       _deemix.queue_progress({}, _URL) == (None, None))
+
+
+# ------------------------------------------- Duplikatlauf von Anfang bis Ende
+# Der eigentliche Beweis: ein Index mit echten Faellen durch den ganzen Ablauf
+# schicken - suchen, gruppieren, auswaehlen, in Quarantaene, Frist abwarten,
+# endgueltig loeschen. Ohne ffmpeg auf dieser Maschine wird der akustische
+# Teil mit vorbereiteten Fingerabdruecken gefuettert; die Vergleichslogik
+# selbst ist weiter oben einzeln geprueft.
+
+async def _dedupe_lauf():
+    try:
+        return await _dedupe_lauf_inner()
+    finally:
+        # Ohne das haelt ein offener aiosqlite-Thread den Prozess am Leben,
+        # wenn unterwegs etwas schiefgeht - der Lauf haengt dann still.
+        try:
+            await _dbmod.db.close()
+        except Exception:
+            pass
+
+
+async def _dedupe_lauf_inner():
+    import struct
+    from app.services import dedupe as _dd
+
+    _dbmod.configure(BASE / "data" / "dedupe.db")
+    await _dbmod.db.connect()
+
+    musik = BASE / "music"
+
+    async def lege_an(rel, inhalt, **rest):
+        """Legt die Datei wirklich an - der Ablauf verschiebt sie spaeter."""
+        ziel = musik / rel
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        ziel.write_bytes(inhalt)
+        felder = {
+            "path": str(ziel), "size": len(inhalt), "ext": ziel.suffix.lower(),
+            "duration": 240.0, "bitrate": 900_000, "sample_rate": 44100,
+            "has_cover": 1, "title": ziel.stem, "artist": "Interpret",
+            "album": "Album", "album_artist": "Interpret", "year": 2011, "track_no": 1,
+        }
+        felder.update(rest)
+        spalten = ",".join(felder)
+        platz = ",".join("?" * len(felder))
+        return int(await _dbmod.db.execute(
+            f"INSERT INTO media_file({spalten}) VALUES ({platz})", tuple(felder.values())))
+
+    # Fall 1: dieselbe Datei zweimal, einmal mit "(2)". Der klare Fall.
+    bytes_a = b"AAAA" * 1000
+    id_orig = await lege_an("Nirvana/Nevermind/01 - Song.flac", bytes_a, file_hash="h1")
+    id_kopie = await lege_an("Nirvana/Nevermind/01 - Song (2).flac", bytes_a, file_hash="h1")
+
+    # Fall 2: dieselbe Musik, aber eine davon steht in einer Playlist.
+    bytes_b = b"BBBB" * 1000
+    await lege_an("Avicii/True/09 - Hope.flac", bytes_b, file_hash="h2")
+    id_gesch = await lege_an("Avicii/True/09 - Hope (2).flac", bytes_b, file_hash="h2",
+                             protected=1, protect_why="playlist")
+
+    # Fall 3: gleiche Musik, anderes Encoding - nur akustisch zu finden.
+    id_flac = await lege_an("Swedish House Mafia/Until Now/03 - Greyhound.flac",
+                            b"CCCC" * 1000, file_hash="h3", audio_hash="a3")
+    id_mp3 = await lege_an("downloads/Greyhound.mp3", b"DDDD" * 500,
+                           file_hash="h4", audio_hash="a4", ext=".mp3", bitrate=320_000)
+
+    # Zwei Fingerabdruecke, die sich in wenigen Bits unterscheiden - so wie
+    # zwei Kodierungen derselben Aufnahme.
+    grund = [(i * 2654435761) & 0xFFFFFFFF for i in range(300)]
+    leicht_anders = [w ^ (1 << (i % 3)) for i, w in enumerate(grund)]
+
+    def packe(worte):
+        return struct.pack(f"<{len(worte)}I", *worte)
+
+    for datei_id, worte in ((id_flac, grund), (id_mp3, leicht_anders)):
+        await _dbmod.db.execute(
+            "INSERT INTO fingerprint(media_file_id, duration, raw_fp, bucket) "
+            "VALUES (?,?,?,?)", (datei_id, 240.0, packe(worte), grund[0] >> 20))
+
+    # --- Suchen -------------------------------------------------------------
+    job = int(await _dbmod.db.execute(
+        "INSERT INTO job(type, payload) VALUES ('find_dupes', '{}')"))
+    bericht = await _dd.handle_find_dupes({"id": job, "payload": {"acoustic": True}})
+
+    seite = await _dd.groups("open", limit=50)
+    nach_art = {g["kind"]: g for g in seite["groups"]}
+
+    # --- Wer soll bleiben? --------------------------------------------------
+    exakt = [g for g in seite["groups"] if g["kind"] == "exact"]
+    keeper_ids = {g["id"]: g["keeper_id"] for g in exakt}
+    kopie_gruppe = next(
+        (g for g in exakt if any(m["id"] == id_kopie for m in g["members"])), None)
+    gesch_gruppe = next(
+        (g for g in exakt if any(m["id"] == id_gesch for m in g["members"])), None)
+
+    # --- Anwenden -----------------------------------------------------------
+    # Der Schutzschalter steht im Auslieferungszustand auf "aus". settings ist
+    # eingefroren, damit ihn niemand versehentlich zur Laufzeit umlegt - im
+    # Test wird er deshalb ausdruecklich umgangen.
+    object.__setattr__(_dd.settings, "allow_dedupe_apply", True)
+    await _dd.setze_quarantaene_tage(21)
+    job2 = int(await _dbmod.db.execute(
+        "INSERT INTO job(type, payload) VALUES ('apply_dupes', '{}')"))
+    angewandt = await _dd.handle_apply(
+        {"id": job2, "payload": {"groups": [g["id"] for g in exakt]}})
+
+    kopie_weg = not (musik / "Nirvana/Nevermind/01 - Song (2).flac").exists()
+    gesch_da = (musik / "Avicii/True/09 - Hope (2).flac").exists()
+    in_quarantaene = await _dd.quarantaene("held")
+
+    # --- Frist: vor Ablauf passiert nichts ---------------------------------
+    job3 = int(await _dbmod.db.execute(
+        "INSERT INTO job(type, payload) VALUES ('purge_quarantine', '{}')"))
+    frueh = await _dd.handle_purge({"id": job3, "payload": {}})
+    noch_da = (await _dd.quarantaene("held"))["total"]
+
+    # --- Frist abgelaufen ---------------------------------------------------
+    await _dbmod.db.execute(
+        "UPDATE quarantine_item SET purge_at = datetime('now', '-1 day') WHERE state = 'held'")
+    spaet = await _dd.handle_purge({"id": job3, "payload": {}})
+    nach_purge = (await _dd.quarantaene("held"))["total"]
+    ordner_leer = not any((BASE / "quarantine").rglob("*.flac"))
+
+    return {
+        "bericht": bericht, "seite": seite, "nach_art": nach_art,
+        "kopie_gruppe": kopie_gruppe, "gesch_gruppe": gesch_gruppe,
+        "keeper_ids": keeper_ids, "id_orig": id_orig, "id_kopie": id_kopie,
+        "id_gesch": id_gesch, "id_flac": id_flac, "id_mp3": id_mp3,
+        "angewandt": angewandt, "kopie_weg": kopie_weg, "gesch_da": gesch_da,
+        "quarantaene": in_quarantaene, "frueh": frueh, "noch_da": noch_da,
+        "spaet": spaet, "nach_purge": nach_purge, "ordner_leer": ordner_leer,
+    }
+
+
+_dl = asyncio.run(_dedupe_lauf())
+
+check("Lauf: findet exakte und akustische Duplikate",
+      "exakt: 2" in _dl["bericht"] and "akustisch: 1" in _dl["bericht"], _dl["bericht"])
+check("Lauf: akustische Gruppe gefunden trotz anderem Format",
+      "acoustic" in _dl["nach_art"],
+      "FLAC und MP3 derselben Aufnahme gehoeren zusammen")
+check("Lauf: Seite meldet Gesamtzahl und Verschwendung",
+      _dl["seite"]["total"] == 3 and _dl["seite"]["wasted"] > 0,
+      f"{_dl['seite']['total']} Gruppen, {_dl['seite']['wasted']} Bytes")
+
+check("Lauf: das Original bleibt, nicht die (2)",
+      _dl["kopie_gruppe"] and _dl["kopie_gruppe"]["keeper_id"] == _dl["id_orig"])
+check("Lauf: die nummerierte Kopie ist als solche erkannt",
+      any(m["copy_no"] == 2 for m in (_dl["kopie_gruppe"] or {}).get("members", [])))
+check("Lauf: eindeutige Gruppe ist zur Auto-Auswahl markiert",
+      bool(_dl["kopie_gruppe"] and _dl["kopie_gruppe"]["auto_ok"]),
+      (_dl["kopie_gruppe"] or {}).get("auto_why", ""))
+
+check("Lauf: geschuetzte Datei wird als Keeper gewaehlt",
+      _dl["gesch_gruppe"] and _dl["gesch_gruppe"]["keeper_id"] == _dl["id_gesch"],
+      "was in einer Playlist steht, bleibt")
+check("Lauf: geschuetzter Sieger darf seine Kopie automatisch abraeumen",
+      _dl["gesch_gruppe"] and _dl["gesch_gruppe"]["auto_ok"],
+      (_dl["gesch_gruppe"] or {}).get("auto_why", ""))
+
+check("Lauf: Kopie ist aus der Bibliothek verschwunden", _dl["kopie_weg"])
+check("Lauf: geschuetzte Datei liegt noch da", _dl["gesch_da"])
+check("Lauf: Quarantaene fuehrt Buch",
+      _dl["quarantaene"]["total"] == 2 and _dl["quarantaene"]["days"] == 21,
+      f"{_dl['quarantaene']['total']} Eintraege, {_dl['quarantaene']['days']} Tage")
+check("Lauf: Quarantaene nennt die verbleibende Frist",
+      all(i["days_left"] >= 20 for i in _dl["quarantaene"]["items"]),
+      str([i["days_left"] for i in _dl["quarantaene"]["items"]]))
+
+check("Lauf: vor Fristablauf wird nichts geloescht",
+      _dl["frueh"] == "Nichts faellig" and _dl["noch_da"] == 2, _dl["frueh"])
+check("Lauf: nach Fristablauf wird geloescht",
+      _dl["nach_purge"] == 0 and "2 endgueltig geloescht" in _dl["spaet"], _dl["spaet"])
+check("Lauf: der Quarantaeneordner ist danach leer", _dl["ordner_leer"])
 
 
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
