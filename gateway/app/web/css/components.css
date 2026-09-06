@@ -741,3 +741,11 @@ kbd {
 }
 .pager-luecke { color: var(--text-faint); padding: 0 var(--s1); }
 .pager .btn[aria-current="page"] { pointer-events: none; }
+
+/* Ein Geheimnis mit Kopierknopf. Der Wert bricht um, der Knopf nicht. */
+.secret-row {
+  display: flex; align-items: flex-start; gap: var(--s2);
+  margin: var(--s2) 0;
+}
+.secret-row > .secret { flex: 1; margin: 0; }
+.secret-row > .btn { flex: none; }

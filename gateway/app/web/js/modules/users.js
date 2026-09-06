@@ -1,7 +1,8 @@
 // Benutzer: Dashboard-Konten anlegen, Rolle setzen, Passwort erzeugen.
 
 import { get, post, patch, del } from '../core/api.js';
-import { $, esc, icon, empty, failure, skeleton, relativeTime } from '../core/dom.js';
+import { $, esc, icon, empty, failure, skeleton, relativeTime, geheimnis, kopierKnoepfe }
+  from '../core/dom.js';
 import { werkzeugleiste, anwenden } from '../core/toolbar.js';
 import * as prefs from '../core/prefs.js';
 import { ok, fail } from '../core/toast.js';
@@ -58,7 +59,7 @@ export async function mount(wurzel) {
     $('#u-secret').innerHTML = `
       <div class="notice mt-4">${icon('warn')}<div>
         Passwort für <strong>${esc(name)}</strong> — wird nur jetzt angezeigt:
-        <code class="mono break secret">${esc(passwort)}</code>
+        ${geheimnis(passwort, 'Passwort kopieren')}
         Steht auch im Log: <code>docker logs music-gateway-api | grep Passwort</code>
       </div></div>`;
   }
@@ -163,6 +164,8 @@ export async function mount(wurzel) {
     await lade();
   });
 
+  const abKopie = kopierKnoepfe(wurzel, () => ok('Passwort in der Zwischenablage'), fail);
+
   $('#u-list').addEventListener('click', async (e) => {
     const neu = e.target.closest('[data-reset]');
     const weg = e.target.closest('[data-del]');
@@ -185,4 +188,6 @@ export async function mount(wurzel) {
       }
     } catch (exc) { fail(exc.message); }
   });
+
+  return () => abKopie();
 }

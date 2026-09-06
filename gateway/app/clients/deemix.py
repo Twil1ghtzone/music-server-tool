@@ -207,6 +207,16 @@ async def arl_info() -> dict[str, Any]:
     }
 
 
+async def arl_klartext() -> str | None:
+    """Der hinterlegte ARL im Klartext.
+
+    Bewusst getrennt von arl_info(): der Wert ist ein Zugang zum ganzen
+    Deezer-Konto und darf nicht beilaeufig in jeder Statusantwort mitfahren.
+    Wer ihn hier abruft, tut das absichtlich - und es steht im Protokoll.
+    """
+    return (await db.get_setting(_ARL_KEY) or "").strip() or None
+
+
 async def add_to_queue(url: str, bitrate: str) -> str:
     """Stellt einen Deezer-Link in die Deemix-Warteschlange.
 

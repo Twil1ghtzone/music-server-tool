@@ -43,7 +43,9 @@ export async function mount(wurzel, ctx) {
       <div>
         <h2>Duplikate</h2>
         <p class="lede">Drei Stufen: Byte für Byte identisch, gleicher Ton trotz anderer
-          Tags, gleiche Aufnahme in anderer Kodierung. Es wird nichts gelöscht —
+          Tags, gleiche Aufnahme in anderer Kodierung. Jeder Lauf holt zuerst
+          Playlists, Favoriten und Bewertungen aus Navidrome — was dort hängt,
+          wird nie zum Entfernen ausgewählt. Es wird nichts gelöscht:
           Ausgewähltes wandert in die Quarantäne und bleibt dort eine Frist lang liegen.</p>
       </div>
       <div class="page-actions" id="d-aktionen"></div>
@@ -58,8 +60,10 @@ export async function mount(wurzel, ctx) {
     <div id="d-quarantaene"></div>`;
 
   // --------------------------------------------------------------- Kopfzeile
+  // Kein eigener Abgleich-Knopf: jeder Lauf holt zuerst Playlists, Favoriten
+  // und Bewertungen aus Navidrome. Ein Vorschlag auf veralteten Markierungen
+  // wäre gefährlich, also ist das kein Extraschritt, sondern Teil der Suche.
   $('#d-aktionen').innerHTML = `
-    <button type="button" class="btn" data-do="sync">${icon('refresh')} Mit Navidrome abgleichen</button>
     <button type="button" class="btn" data-do="find">${icon('search')} Schnell suchen</button>
     <button type="button" class="btn btn-primary" data-do="find-acoustic">${icon('bolt')} Gründlich suchen</button>`;
 
@@ -219,7 +223,7 @@ export async function mount(wurzel, ctx) {
         </label>
 
         <div class="dupe-art">
-          ${m.nd_id
+          ${m.has_cover
             ? `<img src="/api/library/files/${m.id}/cover?s=96" alt=""
                     width="48" height="48" loading="lazy" decoding="async">`
             : `<span class="dupe-art-leer">${icon('note')}</span>`}
@@ -508,11 +512,9 @@ export async function mount(wurzel, ctx) {
       if (was === 'find' || was === 'find-acoustic') {
         await post(`/api/library/dupes/find${was === 'find-acoustic' ? '?acoustic=true' : ''}`);
         ok(was === 'find-acoustic'
-          ? 'Gründliche Suche läuft — sie vergleicht auch Aufnahmen in anderer Kodierung.'
-          : 'Suche läuft.');
-      } else if (was === 'sync') {
-        await post('/api/library/protection/sync');
-        ok('Abgleich läuft — Playlists, Favoriten und Bewertungen werden geschützt.');
+          ? 'Gründliche Suche läuft — erst der Abgleich mit Navidrome, dann auch '
+            + 'Aufnahmen in anderer Kodierung.'
+          : 'Suche läuft — Playlists, Favoriten und Bewertungen werden dabei geholt.');
       } else if (was === 'frist') {
         const r = await post('/api/library/quarantine/days', { days: Number($('#q-tage').value) });
         ok(`Frist auf ${r.days} Tage gesetzt. Gilt für alles, was ab jetzt entfernt wird.`);

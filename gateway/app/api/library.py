@@ -13,7 +13,6 @@ from ..config import settings
 from ..db import db
 from ..events import emit
 from ..logging_conf import get_logger
-from ..clients import http, navidrome
 from ..services import dedupe, jobs, protection, scanner, tags
 
 # Was der Browser zum Abspielen braucht. Alles andere geht als
@@ -277,42 +276,73 @@ async def protection_sync(user: dict = Depends(security.guarded_admin)) -> dict:
 # zeigen und hineinhoeren. Beides holt der Gateway mit seinen eigenen
 # Navidrome-Zugangsdaten - das Dashboard hat keine Subsonic-Sitzung.
 
-async def _nd_datei(file_id: int) -> dict:
-    zeile = await db.fetch_one(
-        "SELECT id, nd_id, path, title, artist, album FROM media_file WHERE id = ?", (file_id,))
-    if not zeile:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Datei nicht im Index")
-    if not zeile.get("nd_id"):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Diese Datei ist Navidrome noch nicht zugeordnet. Unter Duplikate "
-            "einmal „Mit Navidrome abgleichen“ ausführen.")
-    return zeile
+# Ein Bild, das es nicht gibt, muss genauso gemerkt werden wie eines, das es
+# gibt. Sonst fragt die Oberflaeche bei jedem Neuzeichnen wieder nach - und
+# eine Liste mit fuenfzig Zeilen erzeugt im Minutentakt fuenfzig Anfragen.
+_OHNE_COVER: set[int] = set()
 
 
 @router.get("/files/{file_id}/cover")
 async def file_cover(
     file_id: int, user: dict = Depends(security.current_user), s: int = Query(160, ge=32, le=1000)
 ) -> Response:
-    zeile = await _nd_datei(file_id)
-    params = await navidrome._credentials()
-    params.update({"id": str(zeile["nd_id"]), "size": str(s)})
-    try:
-        antwort = await http.navidrome().get("/rest/getCoverArt.view", params=params, timeout=15.0)
-        antwort.raise_for_status()
-    except Exception as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Cover nicht verfuegbar") from exc
+    """Das Titelbild einer lokalen Datei.
 
-    typ = antwort.headers.get("content-type", "")
-    if not typ.startswith("image/"):
-        # Navidrome antwortet bei einem Fehler mit einer Subsonic-Meldung,
-        # nicht mit einem Bild. Die als Cover durchzureichen waere ein
-        # kaputtes Bild ohne Erklaerung.
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kein Cover hinterlegt")
-    return Response(
-        antwort.content, media_type=typ,
-        headers={"Cache-Control": "private, max-age=86400"},
-    )
+    Genommen wird es aus der Datei selbst. Navidrome danach zu fragen waere
+    ein Netzaufruf je Bild, haengt daran, dass die Datei dort indiziert ist,
+    und hat dessen Log mit "Parent folder not found" geflutet - eine Warnung
+    je Zeile, bei jedem Neuzeichnen. Das Bild liegt hier auf der Platte.
+    """
+    if file_id in _OHNE_COVER:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kein Cover in der Datei")
+
+    zeile = await db.fetch_one("SELECT path FROM media_file WHERE id = ?", (file_id,))
+    if not zeile:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Datei nicht im Index")
+    pfad = Path(zeile["path"])
+    try:
+        pfad.resolve().relative_to(settings.music_dir.resolve())
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Pfad ausserhalb der Bibliothek") from exc
+
+    # Auf Platte zwischengespeichert: das Bild aus einer FLAC zu lesen heisst,
+    # die Datei zu oeffnen und zu parsen. Einmal reicht.
+    ziel = settings.cache_dir / "filecovers" / f"{file_id}.img"
+    if ziel.exists():
+        return Response(ziel.read_bytes(), media_type=_bildtyp(ziel),
+                        headers={"Cache-Control": "private, max-age=604800"})
+
+    if not pfad.exists():
+        raise HTTPException(status.HTTP_410_GONE, "Datei liegt nicht mehr an diesem Pfad")
+
+    loop = asyncio.get_running_loop()
+    treffer = await loop.run_in_executor(None, tags.cover_bytes, pfad)
+    if not treffer:
+        # Auch das Nichtvorhandensein merken - sonst wird die Datei bei jedem
+        # Neuzeichnen erneut geoeffnet und geparst.
+        _OHNE_COVER.add(file_id)
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Kein Cover in der Datei")
+
+    roh, typ = treffer
+    try:
+        ziel.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ziel.with_suffix(".part")
+        tmp.write_bytes(roh)
+        tmp.replace(ziel)
+        (ziel.parent / f"{file_id}.type").write_text(typ, encoding="utf-8")
+    except OSError as exc:      # Kein Platz o.ae. - Bild trotzdem liefern.
+        log.debug("Cover nicht zwischengespeichert: %s", exc)
+
+    return Response(roh, media_type=typ,
+                    headers={"Cache-Control": "private, max-age=604800"})
+
+
+def _bildtyp(ziel: Path) -> str:
+    merker = ziel.parent / f"{ziel.stem}.type"
+    try:
+        return merker.read_text(encoding="utf-8").strip() or "image/jpeg"
+    except OSError:
+        return "image/jpeg"
 
 
 @router.get("/files/{file_id}/stream")

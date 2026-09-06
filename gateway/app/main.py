@@ -29,6 +29,7 @@ from .api import (
     downloads as downloads_api,
     jobs as jobs_api,
     library as library_api,
+    mediathek as mediathek_api,
     logs as logs_api,
     overview as overview_api,
     search as search_api,
@@ -157,6 +158,7 @@ ROUTER = (
     logs_api,
     diagnostics_api,
     library_api,
+    mediathek_api,
     users_api,
     subsonic_proxy,
 )

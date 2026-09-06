@@ -81,6 +81,56 @@ def has_cover(path: Path) -> bool:
     return bool(pictures)
 
 
+def cover_bytes(path: Path) -> tuple[bytes, str] | None:
+    """Das eingebettete Titelbild als (Bytes, MIME) - oder None.
+
+    Warum aus der Datei und nicht von Navidrome: es ist ohnehin da. Navidrome
+    danach zu fragen kostet einen Netzaufruf je Bild, haengt davon ab, dass
+    die Datei dort indiziert ist, und flutet bei einer Liste mit fuenfzig
+    Zeilen dessen Log mit Warnungen. Die Datei liegt hier auf der Platte.
+    """
+    try:
+        audio = MutagenFile(path)
+    except Exception:
+        audio = None
+
+    if audio is not None:
+        # FLAC, Ogg und andere mit echten Bildobjekten.
+        bilder = getattr(audio, "pictures", None)
+        if bilder:
+            bild = bilder[0]
+            return bild.data, (bild.mime or "image/jpeg")
+
+        # MP4/M4A: das Format steckt im Objekt, nicht in einem MIME-Feld.
+        if isinstance(audio, MP4):
+            deckel = (audio.tags or {}).get("covr") or []
+            if deckel:
+                roh = bytes(deckel[0])
+                art = getattr(deckel[0], "imageformat", None)
+                return roh, "image/png" if art == MP4Cover.FORMAT_PNG else "image/jpeg"
+
+        # Manche Container tragen ID3 im Objekt statt am Dateianfang.
+        marken = getattr(getattr(audio, "tags", None), "getall", None)
+        if marken:
+            try:
+                treffer = marken("APIC")
+                if treffer:
+                    return treffer[0].data, (treffer[0].mime or "image/jpeg")
+            except Exception:
+                pass
+
+    # ID3 am Dateianfang - unabhaengig davon, ob Mutagen den Container
+    # erkannt hat. Ein nicht erkanntes Format ist kein Grund, ein vorhandenes
+    # Bild zu uebersehen.
+    try:
+        marken = ID3(path).getall("APIC")
+        if marken:
+            return marken[0].data, (marken[0].mime or "image/jpeg")
+    except Exception:
+        pass
+    return None
+
+
 def read(path: Path) -> dict[str, Any]:
     """Liest die Felder, die fuer Anzeige, Import und Duplikatbewertung zaehlen."""
     out: dict[str, Any] = {k: None for k in FIELDS}

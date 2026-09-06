@@ -783,6 +783,69 @@ check("Lauf: nach Fristablauf wird geloescht",
 check("Lauf: der Quarantaeneordner ist danach leer", _dl["ordner_leer"])
 
 
+# ------------------------------------------------------- Anmeldesperre
+# Der Fall, der einen Benutzer mit dem richtigen Passwort ausgesperrt hat:
+# fuenf Vertipper beim zwanzigstelligen Startpasswort, danach galt die Sperre
+# das ganze 15-Minuten-Fenster - waehrend die Meldung "bitte 5 Sekunden
+# warten" versprach. Und eine erfolgreiche Anmeldung raeumte die Zaehler nie
+# ab, also fiel man beim naechsten Vertipper sofort wieder hinein.
+
+async def _sperr_faelle():
+    _dbmod.configure(BASE / "data" / "sperre.db")
+    await _dbmod.db.connect()
+    try:
+        from app import security as _sec
+
+        async def fehlversuche(n, name="opfer", ip="10.0.0.9"):
+            for _ in range(n):
+                await _sec.record_attempt(ip, name, False)
+
+        # Unter der Grenze: frei.
+        await fehlversuche(_sec.MAX_ATTEMPTS_PER_USER - 1)
+        unter = await _sec.is_throttled("10.0.0.9", "opfer")
+
+        # Grenze erreicht: gesperrt, mit einer Wartezeit groesser null.
+        await fehlversuche(1)
+        drueber = await _sec.is_throttled("10.0.0.9", "opfer")
+
+        # Die genannte Wartezeit muss die Wahrheit sein: nach ihrem Ablauf
+        # ist wieder frei. Statt zu warten wird der letzte Versuch
+        # zurueckdatiert.
+        await _dbmod.db.execute(
+            "UPDATE login_attempt SET ts = datetime('now', '-120 seconds')")
+        nach_wartezeit = await _sec.is_throttled("10.0.0.9", "opfer")
+
+        # Und eine erfolgreiche Anmeldung raeumt auf.
+        await fehlversuche(_sec.MAX_ATTEMPTS_PER_USER)
+        vor_erfolg = await _sec.is_throttled("10.0.0.9", "opfer")
+        await _sec.clear_attempts("opfer", "10.0.0.9")
+        nach_erfolg = await _sec.is_throttled("10.0.0.9", "opfer")
+
+        # Ein anderes Konto von einer anderen IP bleibt davon unberuehrt.
+        await fehlversuche(_sec.MAX_ATTEMPTS_PER_USER, "fremder", "10.0.0.99")
+        fremder = await _sec.is_throttled("10.0.0.99", "fremder")
+
+        return unter, drueber, nach_wartezeit, vor_erfolg, nach_erfolg, fremder
+    finally:
+        try:
+            await _dbmod.db.close()
+        except Exception:
+            pass
+
+
+(_unter, _drueber, _nach_zeit, _vor_erfolg, _nach_erfolg, _fremder) = asyncio.run(_sperr_faelle())
+
+check("Sperre: unter der Grenze bleibt offen", _unter == (False, 0), str(_unter))
+check("Sperre: an der Grenze wird gesperrt", _drueber[0] and _drueber[1] > 0, str(_drueber))
+check("Sperre: die genannte Wartezeit stimmt",
+      _nach_zeit == (False, 0),
+      "nach Ablauf der angesagten Zeit ist wieder offen, nicht erst nach 15 Minuten")
+check("Sperre: erfolgreiche Anmeldung raeumt den Zaehler",
+      _vor_erfolg[0] and _nach_erfolg == (False, 0),
+      f"{_vor_erfolg} -> {_nach_erfolg}")
+check("Sperre: fremdes Konto bleibt unberuehrt", _fremder[0], str(_fremder))
+
+
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
 check("NoCredentials ist ein permanenter Fehler",
       issubclass(navidrome.NoCredentials, PermanentError))

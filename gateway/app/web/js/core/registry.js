@@ -20,7 +20,8 @@ export const MODULE = [
   { id: 'queue',       titel: 'Warteschlange',    symbol: 'queue',       gruppe: 'musik',  admin: false },
   { id: 'jobs',        titel: 'Jobs',             symbol: 'jobs',        gruppe: 'musik',  admin: false },
 
-  { id: 'library',     titel: 'Bibliothek',       symbol: 'library',     gruppe: 'pflege', admin: true },
+  { id: 'mediathek',   titel: 'Mediathek',        symbol: 'library',     gruppe: 'pflege', admin: false },
+  { id: 'library',     titel: 'Dateien',          symbol: 'diagnostics', gruppe: 'pflege', admin: true },
   { id: 'dupes',       titel: 'Duplikate',        symbol: 'dupes',       gruppe: 'pflege', admin: true },
   { id: 'tags',        titel: 'Tag-Werkstatt',    symbol: 'tags',        gruppe: 'pflege', admin: true },
 

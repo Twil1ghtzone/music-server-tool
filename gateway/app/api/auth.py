@@ -41,7 +41,8 @@ async def login(body: LoginBody, request: Request) -> JSONResponse:
         )
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"Zu viele Fehlversuche. Bitte {delay} Sekunden warten.",
+            f"Zu viele Fehlversuche. Der Zugang ist noch {delay} Sekunden gesperrt - "
+            f"auch mit dem richtigen Passwort.",
         )
 
     user = await db.fetch_one(
@@ -68,6 +69,8 @@ async def login(body: LoginBody, request: Request) -> JSONResponse:
 
     token, csrf = await security.create_session(int(user["id"]), request)
     await security.record_attempt(ip, body.username, True)
+    # Der Zaehler wird geleert: wer sein Passwort kennt, ist kein Rateversuch.
+    await security.clear_attempts(body.username, ip)
     await db.execute(
         "UPDATE app_user SET last_login_at = datetime('now') WHERE id = ?", (user["id"],)
     )

@@ -54,6 +54,46 @@ const ZUSTAND = {
  *  Muss nach dem Einsetzen von HTML aufgerufen werden: die Richtlinie
  *  style-src 'self' verwirft style="…" im Markup, die Zuweisung über
  *  element.style betrifft sie dagegen nicht. */
+/**
+ * Ein Geheimnis zum Abschreiben — mit Kopierknopf.
+ *
+ * Der Knopf ist nicht Bequemlichkeit, sondern die Fehlerquelle: ein
+ * zwanzigstelliges Passwort tippt man falsch ab, und fünf Fehlversuche
+ * sperren den Zugang. Wer kopiert, vertippt sich nicht.
+ */
+export function geheimnis(wert, beschriftung = 'Kopieren') {
+  return `<span class="secret-row">
+    <code class="mono break secret" data-geheim>${esc(wert)}</code>
+    <button type="button" class="btn btn-sm" data-kopiere="${esc(wert)}"
+            title="${esc(beschriftung)}">${icon('logs')} ${esc(beschriftung)}</button>
+  </span>`;
+}
+
+/**
+ * Hängt einen Zuhörer an, der jeden [data-kopiere]-Knopf darunter bedient.
+ * Gibt die Abmeldefunktion zurück.
+ */
+export function kopierKnoepfe(wurzel, beiErfolg = () => {}, beiFehler = () => {}) {
+  const handler = async (e) => {
+    const knopf = e.target.closest('[data-kopiere]');
+    if (!knopf) return;
+    try {
+      await navigator.clipboard.writeText(knopf.dataset.kopiere);
+      const alt = knopf.innerHTML;
+      knopf.innerHTML = `${icon('check')} Kopiert`;
+      setTimeout(() => { knopf.innerHTML = alt; }, 1600);
+      beiErfolg();
+    } catch {
+      // Ohne sicheren Kontext (http statt https) verweigern manche Browser
+      // die Zwischenablage. Dann bleibt das Markieren von Hand.
+      beiFehler('Der Browser hat die Zwischenablage verweigert — '
+                + 'markiere den Wert und kopiere ihn von Hand.');
+    }
+  };
+  wurzel.addEventListener('click', handler);
+  return () => wurzel.removeEventListener('click', handler);
+}
+
 export function balkenFuellen(wurzel) {
   for (const balken of (wurzel || document).querySelectorAll('.bar[data-anteil]')) {
     const span = balken.firstElementChild;

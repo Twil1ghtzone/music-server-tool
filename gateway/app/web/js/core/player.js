@@ -47,7 +47,13 @@ function bau() {
 
   leiste.addEventListener('click', (e) => {
     if (e.target.closest('[data-player-stop]')) stop();
+    else if (e.target.closest('[data-player-pause]')) { pause(); zeichne(); }
   });
+
+  // Pausiert der Browser von sich aus - etwa weil das Gerät stumm geschaltet
+  // wurde - soll die Leiste das zeigen und nicht weiter "Pause" anbieten.
+  audio.addEventListener('pause', () => zeichne());
+  audio.addEventListener('play', () => zeichne());
 }
 
 function zeichne(state = {}) {
@@ -70,9 +76,11 @@ function zeichne(state = {}) {
       <div class="player-sub">${esc(t.artist || '')}</div>
     </div>
     <span class="player-note">${t.src ? 'aus deiner Bibliothek' : 'Hörprobe, 30&nbsp;s'}</span>
-    <button class="btn btn-icon btn-ghost" data-player-stop aria-label="Hörprobe beenden">
-      ${icon('close')}
-    </button>`;
+    <button class="btn btn-icon btn-ghost" data-player-pause
+            aria-label="${audio?.paused ? 'Weiter' : 'Pause'}"
+            title="${audio?.paused ? 'Weiter' : 'Pause'}">${icon(audio?.paused ? 'play' : 'pause')}</button>
+    <button class="btn btn-icon btn-ghost" data-player-stop aria-label="Wiedergabe beenden"
+            title="Beenden">${icon('close')}</button>`;
   leiste.hidden = false;
 }
 
@@ -119,10 +127,29 @@ export function stop() {
   if (!audio || !laufenderTitel) return false;
   audio.pause();
   audio.removeAttribute('src');
+  // load() ist der entscheidende Teil: das Attribut zu entfernen genügt
+  // nicht. Der Browser spielt dann aus dem bereits geladenen Puffer weiter
+  // und lädt ihn sogar zu Ende. Bei einer 30-Sekunden-Hörprobe fiel das nicht
+  // auf, bei einem ganzen Lied aus der Bibliothek sofort. Erst load() setzt
+  // das Element wirklich zurück.
+  try { audio.load(); } catch { /* uralte Browser: dann bleibt es beim pause */ }
+  audio.currentTime = 0;
   laufenderTitel = null;
   zeichne();
   melde();
   return true;
 }
+
+/** Pause und Weiter für die laufende Datei — bei einem ganzen Lied will man
+ *  nicht anhalten und von vorn beginnen, sondern kurz unterbrechen. */
+export function pause() {
+  if (!audio || !laufenderTitel) return false;
+  if (audio.paused) audio.play().catch(() => {});
+  else audio.pause();
+  melde();
+  return true;
+}
+
+export const pausiert = () => Boolean(audio?.paused);
 
 export const laeuft = () => laufenderTitel?.id ?? null;

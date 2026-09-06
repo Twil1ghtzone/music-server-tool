@@ -69,7 +69,13 @@ export async function mount(wurzel) {
     const deemix = arl.configured
       ? `<p>ARL hinterlegt <span class="mono faint">${esc(arl.hint || '')}</span> —
            der Gateway meldet sich damit selbst bei Deemix an.</p>
-         <button type="button" class="btn btn-ghost" id="arl-clear">ARL entfernen</button>`
+         <div class="btn-row">
+           <button type="button" class="btn" id="arl-copy">${icon('logs')} ARL kopieren</button>
+           <button type="button" class="btn btn-ghost" id="arl-clear">ARL entfernen</button>
+         </div>
+         <div id="arl-out"></div>
+         <p class="muted tiny mt-2">Der Wert ist ein Zugang zu deinem ganzen
+           Deezer-Konto. Das Abrufen steht im Protokoll.</p>`
       : `<p class="muted">Deemix hält die Deezer-Anmeldung <strong>pro Browser-Sitzung</strong>.
            Dass die Deemix-Oberfläche angemeldet ist, hilft dem Gateway nicht — er ist ein
            eigener Client. Trag den ARL hier ein, dann meldet er sich selbst an.</p>
@@ -184,6 +190,24 @@ export async function mount(wurzel) {
         await del(credWeg ? '/api/navidrome/credentials' : '/api/deemix/arl');
         ok('Entfernt');
         await lade();
+      } catch (exc) { fail(exc.message); }
+      return;
+    }
+
+    if (e.target.closest('#arl-copy')) {
+      try {
+        const { arl } = await post('/api/deemix/arl/reveal');
+        // Die Zwischenablage kann verweigert werden — dann wird der Wert
+        // angezeigt, statt so zu tun, als sei etwas passiert.
+        try {
+          await navigator.clipboard.writeText(arl);
+          ok('ARL in der Zwischenablage');
+          $('#arl-out').innerHTML = '';
+        } catch {
+          $('#arl-out').innerHTML = `<div class="notice mt-3">${icon('warn')}<div>
+            Der Browser hat die Zwischenablage verweigert. Hier ist der Wert
+            zum Markieren:<code class="mono break secret">${esc(arl)}</code></div></div>`;
+        }
       } catch (exc) { fail(exc.message); }
       return;
     }

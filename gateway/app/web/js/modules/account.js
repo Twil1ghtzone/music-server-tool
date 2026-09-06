@@ -1,7 +1,7 @@
 // Konto: eigenes Passwort und Zwei-Faktor.
 
 import { get, post } from '../core/api.js';
-import { $, esc, icon, failure, skeleton } from '../core/dom.js';
+import { $, esc, icon, failure, skeleton, geheimnis, kopierKnoepfe } from '../core/dom.js';
 import { ok, fail } from '../core/toast.js';
 
 export const meta = { id: 'account', titel: 'Konto' };
@@ -72,8 +72,8 @@ export async function mount(wurzel, ctx) {
     $('#pw-out').innerHTML = `
       <div class="notice mt-4">${icon('warn')}<div>
         Neues Passwort für <strong>${esc(name)}</strong> — wird nur jetzt angezeigt:
-        <code class="mono break secret">${esc(passwort)}</code>
-        Jetzt notieren und danach neu anmelden.
+        ${geheimnis(passwort, 'Passwort kopieren')}
+        Jetzt kopieren und danach neu anmelden.
       </div></div>`;
   }
 
@@ -122,6 +122,8 @@ export async function mount(wurzel, ctx) {
       ok('Zwei-Faktor aktiviert');
     } catch (exc) { fail(exc.message); }
   });
+
+  kopierKnoepfe(wurzel, () => ok('In der Zwischenablage'), fail);
 
   $('#totp-off').addEventListener('click', async () => {
     const code = prompt('Aktuellen Code zur Bestätigung eingeben:');

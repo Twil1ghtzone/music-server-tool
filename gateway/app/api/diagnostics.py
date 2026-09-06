@@ -99,6 +99,24 @@ async def set_deemix_arl(body: ArlBody, user: dict = Depends(security.guarded_ad
     return {**info, **await deemix.arl_info()}
 
 
+@router.post("/deemix/arl/reveal")
+async def reveal_deemix_arl(user: dict = Depends(security.guarded_admin)) -> dict:
+    """Gibt den hinterlegten ARL heraus, damit man ihn kopieren kann.
+
+    POST und nicht GET: das ist keine Abfrage, sondern eine Handlung mit
+    Folgen - sie steht im Protokoll und laesst sich nicht aus Versehen
+    ueber einen Link ausloesen.
+    """
+    arl = await deemix.arl_klartext()
+    if not arl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Es ist kein ARL hinterlegt.")
+    await events.emit(
+        f"ARL im Klartext abgerufen von {user.get('username')}",
+        category="auth", level="warn",
+    )
+    return {"arl": arl}
+
+
 @router.delete("/deemix/arl")
 async def delete_deemix_arl(user: dict = Depends(security.guarded_admin)) -> dict:
     await deemix.clear_arl()

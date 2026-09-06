@@ -87,7 +87,15 @@ x-gateway-env: &gateway-env
   GATEWAY_IMPORT_LAYOUT: ${GATEWAY_IMPORT_LAYOUT:-preserve}
 
   # Beide aus: der Gateway fasst keine vorhandene Datei an, er legt nur neue an.
+  #
+  # GATEWAY_ALLOW_DEDUPE_APPLY schaltet das Bereinigen der Duplikate frei.
+  # Suchen und Ansehen geht auch ohne - erst mit "true" darf die Seite
+  # "Duplikate" Dateien in die Quarantaene verschieben (von dort verschwinden
+  # sie nach der eingestellten Frist, Standard 21 Tage). Zum Freischalten hier
+  # auf "true" aendern und "docker compose up -d" laufen lassen.
   GATEWAY_ALLOW_DEDUPE_APPLY: ${GATEWAY_ALLOW_DEDUPE_APPLY:-false}
+
+  # Erlaubt der Tag-Werkstatt, Tags in vorhandene Dateien zu schreiben.
   GATEWAY_ALLOW_TAG_WRITE: ${GATEWAY_ALLOW_TAG_WRITE:-false}
 
 services:

@@ -91,6 +91,20 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+async def clear_attempts(username: str, ip: str) -> None:
+    """Loescht die Fehlversuche eines Kontos nach erfolgreicher Anmeldung.
+
+    Ohne das bleiben sie das ganze Fenster ueber stehen: wer sich einmal
+    vertippt und danach richtig anmeldet, faellt beim naechsten Vertipper
+    sofort wieder in die Sperre - und zwar mit voller Strafe. Wer sein
+    Passwort kennt, hat bewiesen, dass er kein Rateversuch ist.
+    """
+    await db.execute(
+        "DELETE FROM login_attempt WHERE success = 0 AND (username = ? OR ip = ?)",
+        (username, ip),
+    )
+
+
 async def record_attempt(ip: str, username: str | None, success: bool) -> None:
     await db.execute(
         "INSERT INTO login_attempt(ip, username, success) VALUES (?,?,?)",
@@ -102,7 +116,13 @@ async def is_throttled(ip: str, username: str | None) -> tuple[bool, int]:
     """Gibt (gesperrt, Wartezeit-Sekunden) zurueck.
 
     Zwei Achsen: pro IP (gegen breites Scannen) und pro Konto (gegen gezieltes
-    Raten ueber wechselnde IPs). Backoff waechst exponentiell.
+    Raten ueber wechselnde IPs).
+
+    Die Wartezeit wird ab dem LETZTEN Fehlversuch gerechnet, nicht als feste
+    Zahl. Vorher stand in der Meldung "bitte 5 Sekunden warten", waehrend die
+    Sperre in Wahrheit bis zum Ende des 15-Minuten-Fensters galt - man wartete
+    fuenf Sekunden, versuchte es wieder, scheiterte wieder und hielt am Ende
+    das richtige Passwort fuer falsch. Was dasteht, muss stimmen.
     """
     since = (datetime.now(timezone.utc) - timedelta(minutes=ATTEMPT_WINDOW_MINUTES)).strftime(
         "%Y-%m-%d %H:%M:%S"
@@ -126,13 +146,26 @@ async def is_throttled(ip: str, username: str | None) -> tuple[bool, int]:
             or 0
         )
 
-    over_ip = max(0, by_ip - MAX_ATTEMPTS_PER_IP)
-    over_user = max(0, by_user - MAX_ATTEMPTS_PER_USER)
-    over = max(over_ip, over_user)
-    if by_ip >= MAX_ATTEMPTS_PER_IP or by_user >= MAX_ATTEMPTS_PER_USER:
-        delay = min(300, 5 * (2 ** min(over, 6)))
-        return True, delay
-    return False, 0
+    if by_ip < MAX_ATTEMPTS_PER_IP and by_user < MAX_ATTEMPTS_PER_USER:
+        return False, 0
+
+    over = max(max(0, by_ip - MAX_ATTEMPTS_PER_IP), max(0, by_user - MAX_ATTEMPTS_PER_USER))
+    strafe = min(300, 5 * (2 ** min(over, 6)))
+
+    # Sekunden seit dem letzten Fehlversuch. Die Sperre endet, wenn seither
+    # genug Zeit vergangen ist - nicht erst, wenn das ganze Fenster ablaeuft.
+    alter = await db.fetch_value(
+        "SELECT CAST((julianday('now') - julianday(MAX(ts))) * 86400 AS INTEGER) "
+        "  FROM login_attempt "
+        " WHERE success = 0 AND ts > ? AND (ip = ? OR username = ?)",
+        (since, ip, username or ""),
+        None,
+    )
+    seit = int(alter or 0)
+    rest = strafe - seit
+    if rest <= 0:
+        return False, 0
+    return True, rest
 
 
 async def prune_attempts() -> None:
