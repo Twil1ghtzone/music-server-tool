@@ -1,0 +1,103 @@
+/* Gestaltungsmerkmale an genau einer Stelle.
+ *
+ * Vorher standen Farben und Abstaende als Einzelwerte quer durch das
+ * Stylesheet - jede Aenderung war Suchen und Ersetzen. Hier ist alles
+ * benannt und einmal definiert.
+ *
+ * Die Palette folgt der Empfehlung der ui-ux-pro-max-Skill fuer
+ * "Dark Mode (OLED)": Slate-Stufen mit hohem Kontrast, dazu Gruen fuer
+ * ausloesende Aktionen. Bewusst NICHT uebernommen wurde die vorgeschlagene
+ * Google-Schrift - sie wuerde externe Hosts erfordern und damit die
+ * Content-Security-Policy aufweichen. Systemschriften kosten nichts und
+ * sind sofort da.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Flaechen, von tief nach hoch ------------------------------------ */
+  --bg:            #0b1220;   /* Seitengrund */
+  --bg-sunken:     #070d18;   /* Eingaben, Codefelder */
+  --surface:       #111b2d;   /* Karten */
+  --surface-hi:    #17253c;   /* Hover, hervorgehobene Zeilen */
+  --surface-max:   #1e3050;   /* aktive Auswahl */
+  --line:          #24334d;
+  --line-strong:   #33456a;
+
+  /* --- Schrift ---------------------------------------------------------- */
+  --text:          #e9eff8;
+  --text-muted:    #93a4bf;
+  --text-faint:    #64748b;
+
+  /* --- Bedeutungsfarben -------------------------------------------------
+   * accent  = Navigation und neutrale Hauptaktionen
+   * go      = etwas anstoßen (Download, Start) - dafuer Gruen, weil es
+   *           genau die Bedeutung "loslegen" traegt
+   * warn/err= Zustaende, nicht Dekoration                                */
+  --accent:        #4c8dff;
+  --accent-hover:  #6ba1ff;
+  --accent-dim:    #1d3a6b;
+  --accent-ink:    #06122a;
+
+  --go:            #22c55e;
+  --go-hover:      #3ad672;
+  --go-dim:        #14532d;
+  --go-ink:        #04240f;
+
+  --warn:          #f0b429;
+  --warn-dim:      #4a3a11;
+  --err:           #f2555a;
+  --err-hover:     #ff7377;
+  --err-dim:       #4a1d20;
+
+  /* --- Abstandsskala (4er-Raster) --------------------------------------- */
+  --s1: 0.25rem;  --s2: 0.5rem;   --s3: 0.75rem;  --s4: 1rem;
+  --s5: 1.5rem;   --s6: 2rem;     --s7: 3rem;     --s8: 4rem;
+
+  /* --- Radien ------------------------------------------------------------ */
+  --r-sm: 6px;  --r: 10px;  --r-lg: 14px;  --r-pill: 999px;
+
+  /* --- Schatten ---------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow:    0 4px 16px rgb(0 0 0 / 40%);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 55%);
+
+  /* --- Typografie --------------------------------------------------------
+   * Zwei Familien nach dem Vorschlag "technisch/Daten": eine Proportionale
+   * fuer Text, eine Dickengleiche fuer Zahlen, Pfade und Protokolle.      */
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --t-xs: 0.72rem;  --t-sm: 0.82rem;  --t-md: 0.9rem;
+  --t-lg: 1.05rem;  --t-xl: 1.35rem;  --t-2xl: 1.75rem;
+
+  --lh-tight: 1.25;
+  --lh:       1.55;   /* Richtwert 1.5-1.75 fuer Fließtext */
+
+  /* --- Bewegung ----------------------------------------------------------
+   * 150-300 ms, wie in der Pruefliste gefordert. Nie "all" animieren,
+   * sondern die konkrete Eigenschaft - das steht in den Regeln und spart
+   * dem Browser unnoetige Arbeit.                                          */
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur:      200ms;
+  --dur-slow: 320ms;
+
+  /* --- Stapelordnung -----------------------------------------------------
+   * Feste Stufen statt gewachsener z-index-Zahlen.                        */
+  --z-base: 1;  --z-sticky: 10;  --z-player: 20;  --z-overlay: 30;
+  --z-toast: 50;
+
+  /* --- Maße --------------------------------------------------------------- */
+  --sidebar-w: 15rem;
+  --content-max: 84rem;
+  --tap: 2.75rem;      /* 44px Mindestgröße fuer Beruehrziele */
+  --tap-compact: 2.25rem;
+}
+
+/* Wer Bewegung reduziert haben will, bekommt sie nicht aufgedraengt.
+ * Nicht auf 0 setzen: 1ms haelt Ablauflogik intakt, die auf
+ * transitionend wartet. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 1ms; --dur: 1ms; --dur-slow: 1ms; }
+}

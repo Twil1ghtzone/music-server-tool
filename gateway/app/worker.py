@@ -27,6 +27,7 @@ Handler = Callable[[dict], Awaitable[str]]
 
 HANDLERS: dict[str, Handler] = {
     jobs.DOWNLOAD_TRACK: downloader.handle_download,
+    jobs.DOWNLOAD_RELEASE: downloader.handle_release,
     jobs.IMPORT_STAGING: downloader.handle_import_staging,
     jobs.NAVIDROME_SCAN: downloader.handle_navidrome_scan,
     jobs.LIBRARY_SCAN: scanner.handle_library_scan,

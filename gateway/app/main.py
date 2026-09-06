@@ -20,10 +20,18 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import preflight
-from .api import auth as auth_api
-from .api import dashboard as dashboard_api
-from .api import library as library_api
-from .api import users as users_api
+from .api import (
+    auth as auth_api,
+    catalog as catalog_api,
+    diagnostics as diagnostics_api,
+    downloads as downloads_api,
+    jobs as jobs_api,
+    library as library_api,
+    logs as logs_api,
+    overview as overview_api,
+    search as search_api,
+    users as users_api,
+)
 from .clients import http
 from .config import ensure_dirs, settings
 from .db import configure, db
@@ -44,6 +52,7 @@ SECURITY_HEADERS = {
     "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
     "Content-Security-Policy": (
         "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+        "media-src 'self'; "
         "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; "
         "base-uri 'none'; form-action 'self'"
     ),
@@ -133,12 +142,25 @@ async def readyz() -> JSONResponse:
         return JSONResponse({"ready": False, "error": str(exc)}, status_code=503)
 
 
+# Ein Modul je Zustaendigkeit - neue Bereiche kommen hier in die Liste,
+# nicht als weiterer Zweig in einer Sammeldatei.
 # Reihenfolge zaehlt: API und Proxy zuerst, der statische Mount ganz zuletzt.
-app.include_router(auth_api.router)
-app.include_router(dashboard_api.router)
-app.include_router(library_api.router)
-app.include_router(users_api.router)
-app.include_router(subsonic_proxy.router)
+ROUTER = (
+    auth_api,
+    overview_api,
+    search_api,
+    catalog_api,
+    downloads_api,
+    jobs_api,
+    logs_api,
+    diagnostics_api,
+    library_api,
+    users_api,
+    subsonic_proxy,
+)
+
+for modul in ROUTER:
+    app.include_router(modul.router)
 
 if WEB_ROOT.exists():
     app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")
