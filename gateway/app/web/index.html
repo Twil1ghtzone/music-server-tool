@@ -6,16 +6,21 @@
   <meta name="color-scheme" content="dark">
   <!-- Muss zum Seitengrund passen, sonst blitzt auf Mobilgeräten die
        Browserleiste in einer anderen Farbe auf. -->
-  <meta name="theme-color" content="#0b1220">
+  <meta name="theme-color" content="#080d17">
   <title>music-server-tool</title>
 
+  <!-- Die Schrift zuerst anfordern: sie steht am Anfang jeder Textzeile,
+       und ein spaeter Tausch laesst die ganze Seite einmal springen. -->
+  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+
+  <link rel="stylesheet" href="/css/fonts.css">
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/base.css">
   <link rel="stylesheet" href="/css/components.css">
   <link rel="stylesheet" href="/css/layout.css">
 
   <!-- SVG statt Emoji: wird überall gleich gezeichnet und lässt sich färben. -->
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234c8dff' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b8cff' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M9 18V5l12-2v13'/%3E%3Ccircle cx='6' cy='18' r='3'/%3E%3Ccircle cx='18' cy='16' r='3'/%3E%3C/svg%3E">
 </head>
 <body>
 
@@ -24,6 +29,7 @@
 <!-- ============================================================= Anmeldung -->
 <div id="login" class="login-shell" hidden>
   <form id="login-form" class="card login-card">
+    <span class="login-mark" id="login-mark" aria-hidden="true"></span>
     <h1 translate="no">music-server-tool</h1>
     <p class="sub">Gateway zwischen Navidrome und Deemix</p>
 
@@ -60,6 +66,8 @@
 
     <div class="sidebar-foot">
       <span class="pill" id="sse-state" title="Verbindung zum Ereignisstrom">offline</span>
+      <button type="button" class="btn btn-sm btn-icon btn-ghost" id="shortcuts"
+              aria-label="Tastaturkürzel anzeigen" title="Tastaturkürzel (?)"></button>
       <button type="button" class="btn btn-sm btn-ghost" id="logout">Abmelden</button>
     </div>
   </aside>

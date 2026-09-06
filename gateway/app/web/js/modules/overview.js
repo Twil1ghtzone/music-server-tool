@@ -42,6 +42,7 @@ export async function mount(wurzel, ctx) {
       zeichneKacheln(s);
       zeichneHinweise(s);
     } catch (exc) {
+      if (!$('#ov-tiles')) return;
       $('#ov-tiles').innerHTML = '';
       $('#ov-hints').innerHTML = failure('Status nicht abrufbar.', exc.message);
     }
@@ -55,6 +56,7 @@ export async function mount(wurzel, ctx) {
     const v = s.virtual || {};
     const disk = s.storage?.music || {};
 
+    if (!$('#ov-tiles')) return;
     $('#ov-tiles').innerHTML = [
       tile('Navidrome',
            nd.online ? (nd.authenticated ? 'online' : 'ohne Zugang') : 'offline',
@@ -142,6 +144,7 @@ export async function mount(wurzel, ctx) {
     $('#ov-events').innerHTML = '';
     (d.events || []).forEach(zeichneEreignis);
     const alben = d.albums || [];
+    if (!$('#ov-albums')) return;
     $('#ov-albums').innerHTML = alben.length
       ? `<div class="grid-cards">${alben.map((a) => `
           <div class="cover-card">
@@ -151,7 +154,7 @@ export async function mount(wurzel, ctx) {
           </div>`).join('')}</div>`
       : empty('Noch keine Alben.', 'Sobald Navidrome erreichbar ist und Titel indexiert sind, stehen sie hier.');
   }).catch((exc) => {
-    $('#ov-albums').innerHTML = failure('Alben nicht abrufbar.', exc.message);
+    if ($('#ov-albums')) $('#ov-albums').innerHTML = failure('Alben nicht abrufbar.', exc.message);
   });
 
   // --- Live bleiben ------------------------------------------------------

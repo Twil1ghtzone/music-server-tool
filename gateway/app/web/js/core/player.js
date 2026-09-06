@@ -8,6 +8,7 @@
 // Proben wären ein Fehler, kein Merkmal.
 
 import { esc, icon } from './dom.js';
+import * as prefs from './prefs.js';
 
 let audio = null;
 let leiste = null;
@@ -18,6 +19,11 @@ function bau() {
   if (leiste) return;
   audio = new Audio();
   audio.preload = 'none';
+  audio.volume = prefs.hole('hoerprobeLautstaerke') ?? 0.8;
+  // Die Lautstärke gilt sofort, nicht erst bei der nächsten Hörprobe.
+  prefs.onChange(() => {
+    if (audio) audio.volume = prefs.hole('hoerprobeLautstaerke') ?? 0.8;
+  });
 
   leiste = document.createElement('div');
   leiste.className = 'player';
@@ -25,6 +31,14 @@ function bau() {
   document.getElementById('view')?.after(leiste);
 
   audio.addEventListener('ended', () => stop());
+  // Der Streifen oben auf der Leiste. 30 Sekunden ohne jede Anzeige fühlen
+  // sich länger an, als sie sind — man weiß nicht, ob noch etwas kommt.
+  audio.addEventListener('timeupdate', () => {
+    const strich = leiste?.querySelector('.player-progress > span');
+    if (strich && audio.duration) {
+      strich.style.width = `${(audio.currentTime / audio.duration) * 100}%`;
+    }
+  });
   audio.addEventListener('error', () => {
     zeichne({ fehler: 'Hörprobe nicht abspielbar' });
     laufenderTitel = null;
@@ -48,6 +62,7 @@ function zeichne(state = {}) {
 
   const t = laufenderTitel;
   leiste.innerHTML = `
+    <div class="player-progress"><span></span></div>
     <div class="player-art">${t.cover
       ? `<img src="${esc(t.cover)}" alt="" width="44" height="44" loading="lazy">` : ''}</div>
     <div class="player-body">
@@ -90,13 +105,16 @@ export function play(track) {
   melde();
 }
 
+/** Hält an. Gibt zurück, ob wirklich etwas lief — das Tastenkürzel
+ *  entscheidet daran, ob es die Leertaste verbraucht oder durchlässt. */
 export function stop() {
-  if (!audio) return;
+  if (!audio || !laufenderTitel) return false;
   audio.pause();
   audio.removeAttribute('src');
   laufenderTitel = null;
   zeichne();
   melde();
+  return true;
 }
 
 export const laeuft = () => laufenderTitel?.id ?? null;

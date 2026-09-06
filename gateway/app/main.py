@@ -15,6 +15,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import mimetypes
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -161,6 +163,13 @@ ROUTER = (
 
 for modul in ROUTER:
     app.include_router(modul.router)
+
+# Windows-Python kennt woff2 nicht und liefert es als text/plain aus. Browser
+# nehmen die Datei trotzdem an - der format()-Hinweis im @font-face entscheidet -
+# aber ein Reverse-Proxy davor koennte sie deshalb falsch behandeln oder ein
+# zweites Mal komprimieren. Einmal richtig anmelden kostet nichts.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
 
 if WEB_ROOT.exists():
     app.mount("/", StaticFiles(directory=str(WEB_ROOT), html=True), name="web")

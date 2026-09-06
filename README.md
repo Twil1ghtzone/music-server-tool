@@ -425,10 +425,11 @@ gateway/app/
 │   ├── library.py     Index, Duplikate, Tags
 │   └── users.py       Konten und Rollen
 └── web/               Dashboard (kein Build-Schritt)
-    ├── css/           tokens · base · components · layout
+    ├── css/           fonts · tokens · base · components · layout
+    ├── fonts/         Inter und JetBrains Mono, im Image mitgeliefert
     └── js/
         ├── core/      api, router, registry, bus, dom, toast, player,
-        │              catalog-ui — der gemeinsame Unterbau
+        │              catalog-ui, prefs, menu, toolbar, shortcuts
         └── modules/   ein Modul je Menüpunkt
 ```
 
@@ -447,6 +448,44 @@ anderen mehr beschädigen. Im Backend hängt `main.py` die Router über eine Lis
 ein; ein neuer Bereich ist eine neue Datei plus ein Eintrag darin.
 
 Kein Build-Schritt: native ES-Module reichen und halten das Image schlank.
+
+### Bequemlichkeit, die sich merkt
+
+Jede Listenseite trägt dieselbe Werkzeugleiste: Suchfeld, Filter, Sortierung mit
+Richtung, Ansichtsumschalter und rechts ein Zahnrad mit den Einstellungen genau
+dieser Seite. Ein Modul baut sie nicht selbst zusammen, sondern beschreibt in
+`core/toolbar.js`, welche Felder es braucht — elf Module, die sich ihren
+Kopfbereich selbst bauen, wären elf Gelegenheiten, es anders zu machen.
+
+Jede Wahl landet über `core/prefs.js` in `localStorage` und gilt beim nächsten
+Mal noch. Nichts davon geht an den Server: es ist die Vorliebe **eines Menschen
+an einem Gerät**, kein Zustand des Systems. Wer das Dashboard am Rechner und am
+Telefon benutzt, darf beide unterschiedlich einstellen.
+
+Unter *Einstellungen* liegt, was überall gilt:
+
+| | |
+|---|---|
+| Dichte | kompakt · normal · luftig — dreht am Faktor, an dem jeder Abstand hängt |
+| Akzentfarbe | blau · violett · türkis · bernstein. Grün, Gelb und Rot bleiben: sie tragen Bedeutung |
+| Bewegung | zusätzlich zu `prefers-reduced-motion` auch von Hand abschaltbar |
+| Startseite | was nach dem Anmelden erscheint |
+| Automatisch aktualisieren | Listen ziehen Live-Ereignisse nach — oder eben nicht, wenn sie einem unter der Hand wegspringen |
+| Rückfragen | vor zerstörenden Aktionen. Das Löschen eines Benutzers fragt immer |
+| Lautstärke | der Hörproben |
+
+Dazu ein paar Tastenkürzel nach einem Muster: `g` gefolgt von einem Buchstaben
+springt irgendwohin, `/` in das Suchfeld der aktuellen Seite, `?` zeigt die
+Liste. Sie greifen nie, während man in ein Feld tippt.
+
+### Warum die Schriften im Image liegen
+
+Die Content-Security-Policy steht auf `'self'`. Eine Schrift direkt von Google
+zu laden hieße, einen fremden Host in den Vertrauensbereich aufzunehmen — kein
+guter Handel für ein schöneres Schriftbild. Also liegen die Dateien im Image:
+drei Stück, zusammen 165 KB, jeweils variabel, also eine Datei für alle
+Schnitte statt sechs einzelne Gewichte. Fällt eine aus, greift die
+Systemschrift; es sieht dann schlichter aus, nicht kaputt.
 
 ### Entscheidungen, die den Rest erklären
 

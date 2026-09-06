@@ -13,3 +13,11 @@ Dockerfile text eol=lf
 *.png binary
 *.jpg binary
 *.mp3 binary
+
+# Schriften sind Binaerdateien. "text=auto" erkennt das normalerweise selbst,
+# aber ein falsch erkanntes woff2 waere unbrauchbar und faellt erst im
+# Browser auf - deshalb ausdruecklich.
+*.woff2 binary
+*.woff  binary
+*.ttf   binary
+*.otf   binary

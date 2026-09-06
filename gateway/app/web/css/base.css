@@ -13,7 +13,6 @@ html {
 
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: var(--t-md);
@@ -22,24 +21,43 @@ body {
   text-rendering: optimizeLegibility;
   /* Verhindert das blaue Aufblitzen beim Antippen auf Mobilgeraeten. */
   -webkit-tap-highlight-color: transparent;
+
+  /* Zwei sehr schwache Lichter oben links und rechts. Man sieht sie nicht
+   * bewusst, aber der Grund wirkt dadurch wie eine Flaeche mit Raum
+   * dahinter statt wie ein Stueck Farbe. Fest, nicht mitscrollend. */
+  background:
+    radial-gradient(1200px 600px at 12% -8%, var(--accent-glow), transparent 60%),
+    radial-gradient(900px 500px at 88% -12%, #ffffff08, transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+
+  /* Inter bringt echte Ziffern gleicher Breite und ein paar bessere
+   * Buchstabenformen mit — beides muss man ausdruecklich anfordern. */
+  font-feature-settings: "cv05" 1, "cv11" 1, "ss03" 1;
+  font-optical-sizing: auto;
 }
 
 h1, h2, h3, h4 {
   margin: 0 0 var(--s2);
   line-height: var(--lh-tight);
-  font-weight: 620;
-  letter-spacing: -0.01em;
+  font-weight: 600;
+  letter-spacing: var(--track-tight);
+  color: var(--text-strong);
   /* Ueberschriften sollen nicht mit einem Wort umbrechen. */
   text-wrap: balance;
 }
 h1 { font-size: var(--t-2xl); }
-h2 { font-size: var(--t-xl); }
+h2 { font-size: var(--t-xl); font-weight: 620; }
+/* h3 ist hier keine Ueberschrift im Text, sondern die Beschriftung eines
+ * Abschnitts — klein, gesperrt, zurueckhaltend. Das ist die Form, die in
+ * technischen Oberflaechen lesbar bleibt, ohne Gewicht zu beanspruchen. */
 h3 {
   font-size: var(--t-xs);
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-faint);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: var(--track-wide);
 }
 
 p { margin: 0 0 var(--s3); max-width: 68ch; }  /* 65-75 Zeichen je Zeile */
@@ -63,9 +81,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: var(--s5) 0; }
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--r-sm);
+  /* Der Ring muss auch auf einer hellen Plakette sichtbar bleiben. */
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 
-::selection { background: var(--accent-dim); color: var(--text); }
+::selection { background: var(--accent-soft); color: var(--text-strong); }
 
 /* --- Formularelemente ---------------------------------------------------- */
 input, select, textarea, button { font: inherit; color: inherit; }
@@ -82,7 +102,9 @@ input, select, textarea {
 }
 input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) {
   border-color: var(--line-strong);
+  background: var(--bg);
 }
+input:focus, select:focus, textarea:focus { border-color: var(--accent-line); }
 input::placeholder, textarea::placeholder { color: var(--text-faint); }
 input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -152,3 +174,11 @@ img { max-width: 100%; display: block; }
 .break { overflow-wrap: anywhere; }
 
 [hidden] { display: none !important; }
+
+/* Schieberegler — die native Darstellung ist auf dunklem Grund kaum zu sehen. */
+input[type="range"] {
+  width: 9rem; min-height: 0; padding: 0; flex: none;
+  background: transparent; border: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

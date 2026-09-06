@@ -4,6 +4,7 @@ import { get, post, q } from '../core/api.js';
 import { $, $$, esc, empty, failure, skeleton, icon } from '../core/dom.js';
 import { karte, trackZeile } from '../core/catalog-ui.js';
 import * as player from '../core/player.js';
+import { werkzeugleiste } from '../core/toolbar.js';
 import { ok, fail } from '../core/toast.js';
 
 export const meta = { id: 'search', titel: 'Suche & Download' };
@@ -30,10 +31,13 @@ export async function mount(wurzel) {
     </div>
 
     <form class="card row" id="s-form" role="search">
-      <label class="sr-only" for="s-q">Suchbegriff</label>
-      <input class="grow" id="s-q" name="q" type="search" spellcheck="false"
-             placeholder="Interpret, Titel, Album…" value="${esc(letzterBegriff)}" required>
-      <button class="btn btn-primary" type="submit">Suchen</button>
+      <div class="field-search grow">
+        ${icon('search')}
+        <label class="sr-only" for="s-q">Suchbegriff</label>
+        <input id="s-q" name="q" type="search" spellcheck="false" autocomplete="off"
+               placeholder="Interpret, Titel, Album…" value="${esc(letzterBegriff)}" required>
+      </div>
+      <button class="btn btn-primary btn-lg" type="submit">Suchen</button>
     </form>
 
     <div class="btn-row" role="tablist" aria-label="Art der Treffer" id="s-tabs">
@@ -41,11 +45,47 @@ export async function mount(wurzel) {
         aria-selected="${a.id === letzteArt}" data-kind="${a.id}">${a.titel}</button>`).join('')}
     </div>
 
+    <div id="s-leiste"></div>
     <div id="s-local"></div>
     <div class="card card-flush">
       <h3 id="s-catalog-head">Im Katalog</h3>
       <div id="s-catalog" class="pad-body"></div>
     </div>`;
+
+  // Die Werkzeugleiste steuert hier nur die Darstellung — gesucht wird über
+  // das Feld darüber, weil eine Suche eine Anfrage ist und kein Filter.
+  const leiste = werkzeugleiste({
+    id: 'search',
+    standard: { ansicht: 'raster', anzahl: 40, lokalZuerst: true },
+    ansicht: [['raster', '', 'grid'], ['liste', '', 'rows']],
+    zusatz: [
+      { name: 'anzahl', art: 'auswahl', zahl: true, label: 'Treffer je Suche',
+        werte: [[20, '20'], [40, '40'], [50, '50']] },
+      { name: 'lokalZuerst', art: 'schalter', label: 'Bibliothek zuerst zeigen',
+        hinweis: 'Sonst stehen die Katalogtreffer oben' },
+    ],
+    beiAenderung: (w, geaendert) => {
+      if (geaendert === 'ansicht') {
+        $('#s-catalog .grid-cards')?.classList.toggle('as-list', w.ansicht === 'liste');
+      } else if (geaendert === 'lokalZuerst') {
+        ordne();
+      } else if ($('#s-q').value.trim()) {
+        suchen();
+      }
+    },
+  });
+  $('#s-leiste').replaceWith(leiste.el);
+
+  /** Bibliothek oben oder unten — je nachdem, wonach man meistens sucht.
+   *  Die Karte wird über ihren Inhalt gesucht, nicht über die
+   *  Geschwisterbeziehung: die ändert sich ja gerade durch das Verschieben. */
+  function ordne() {
+    const lokal = $('#s-local');
+    const katalog = $('#s-catalog')?.closest('.card');
+    if (!lokal || !katalog) return;
+    if (leiste.werte().lokalZuerst) katalog.before(lokal);
+    else katalog.after(lokal);
+  }
 
   markiereTab();
 
@@ -79,6 +119,8 @@ export async function mount(wurzel) {
             trackZeile(t, { laeuft: player.laeuft() })).join('')}</div>`
         : empty('Keine Katalogtreffer.',
                 'Prüfe unter Diagnose, ob der Katalog erreichbar ist.');
+      leiste.setzeZaehler(`${(d.local || []).length} lokal · ${(d.catalog || []).length} im Katalog`);
+      ordne();
     } catch (exc) {
       ziel.innerHTML = failure('Suche fehlgeschlagen.', exc.message);
     }
@@ -89,11 +131,17 @@ export async function mount(wurzel) {
     $('#s-local').innerHTML = '';
     ziel.innerHTML = skeleton(4);
     try {
-      const d = await get(`/api/catalog/search${q({ q: begriff, kind: art, limit: 40 })}`);
+      const d = await get(`/api/catalog/search${q({ q: begriff, kind: art, limit: leiste.werte().anzahl })}`);
       const treffer = d.results || [];
-      if (!treffer.length) { ziel.innerHTML = empty('Keine Treffer.'); return; }
+      leiste.setzeZaehler(`${treffer.length}`);
+      if (!treffer.length) {
+        ziel.innerHTML = empty('Keine Treffer.',
+          'Andere Schreibweise probieren — der Katalog sucht buchstabengetreu.');
+        return;
+      }
 
-      ziel.innerHTML = `<div class="grid-cards">${treffer.map((e) => {
+      const alsListe = leiste.werte().ansicht === 'liste' ? ' as-list' : '';
+      ziel.innerHTML = `<div class="grid-cards${alsListe}">${treffer.map((e) => {
         if (art === 'album') {
           return karte({ href: `#/album/${e.id}`, md5: e.md5_image, art: 'cover',
                          titel: e.title, sub: `${e.artist}${e.year ? ` · ${e.year}` : ''}` });

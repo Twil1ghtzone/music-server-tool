@@ -3,6 +3,7 @@
 import { get, post } from '../core/api.js';
 import { esc, icon, num, failure, skeleton, empty } from '../core/dom.js';
 import { hero, karte, trackZeile, zurueck } from '../core/catalog-ui.js';
+import { werkzeugleiste } from '../core/toolbar.js';
 import * as player from '../core/player.js';
 import { ok, fail } from '../core/toast.js';
 import { bindeKatalogKlicks } from './_katalog-klicks.js';
@@ -47,13 +48,51 @@ export async function mount(wurzel, ctx) {
 
     <div class="card">
       <h3>Diskografie</h3>
-      ${alben.length
-        ? `<div class="grid-cards">${alben.map((al) => karte({
-            href: `#/album/${al.id}`, md5: al.md5_image, art: 'cover',
-            titel: al.title, sub: `${al.year || ''}${al.tracks ? ` · ${al.tracks} Titel` : ''}`,
-          })).join('')}</div>`
-        : empty('Keine Alben gefunden.')}
+      <div id="a-leiste"></div>
+      <div id="a-alben"></div>
     </div>`;
+
+  // Sechzig Alben in einem Raster sind unübersichtlich. Filtern, sortieren
+  // und die Ansicht umschalten macht daraus wieder etwas Benutzbares — und
+  // die Wahl gilt auch auf der nächsten Interpretenseite.
+  const leiste = werkzeugleiste({
+    id: 'artist',
+    standard: { q: '', sort: 'year', richtung: 'ab', ansicht: 'raster', art: 'alle' },
+    suche: { platzhalter: 'Album filtern…', label: 'Diskografie filtern' },
+    filter: [{ name: 'art', label: 'Nach Art filtern', werte: [
+      ['alle', 'Alle Arten'], ['album', 'Nur Alben'], ['single', 'Nur Singles'], ['ep', 'Nur EPs'],
+    ] }],
+    sortierung: [['year', 'Jahr'], ['title', 'Titel'], ['tracks', 'Titelzahl']],
+    ansicht: [['raster', '', 'grid'], ['liste', '', 'rows']],
+    beiAenderung: () => zeichneAlben(),
+  });
+  document.getElementById('a-leiste').replaceWith(leiste.el);
+
+  function zeichneAlben() {
+    const w = leiste.werte();
+    let liste = w.art === 'alle' ? alben : alben.filter((al) => al.record_type === w.art);
+    const suche = (w.q || '').toLowerCase();
+    if (suche) liste = liste.filter((al) => (al.title || '').toLowerCase().includes(suche));
+
+    const richtung = w.richtung === 'ab' ? -1 : 1;
+    const schluessel = { year: (al) => al.year || 0, title: (al) => al.title || '',
+                         tracks: (al) => al.tracks || 0 }[w.sort];
+    liste = [...liste].sort((x, y) => {
+      const a1 = schluessel(x); const b1 = schluessel(y);
+      return (typeof a1 === 'string' ? a1.localeCompare(b1, 'de') : a1 - b1) * richtung;
+    });
+
+    leiste.setzeZaehler(liste.length === alben.length
+      ? `${alben.length}` : `${liste.length} von ${alben.length}`);
+    document.getElementById('a-alben').innerHTML = liste.length
+      ? `<div class="grid-cards${w.ansicht === 'liste' ? ' as-list' : ''}">${liste.map((al) => karte({
+          href: `#/album/${al.id}`, md5: al.md5_image, art: 'cover',
+          titel: al.title, sub: `${al.year || ''}${al.tracks ? ` · ${al.tracks} Titel` : ''}`,
+        })).join('')}</div>`
+      : empty(alben.length ? 'Kein Album passt zum Filter.' : 'Keine Alben gefunden.',
+              alben.length ? 'Setze Suche und Art oben zurück.' : '');
+  }
+  zeichneAlben();
 
   wurzel.addEventListener('click', async (e) => {
     const alles = e.target.closest('[data-release]');

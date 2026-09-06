@@ -1,8 +1,14 @@
 /* Wiederverwendbare Bausteine. Jedes Modul soll aus diesen bauen und
- * moeglichst kein eigenes CSS brauchen. */
+ * moeglichst kein eigenes CSS brauchen.
+ *
+ * Zwei Dinge ziehen sich durch: erhabene Flaechen tragen oben eine
+ * Haarlinie aus Licht (--line-top), und nichts animiert "all" — immer nur
+ * die Eigenschaft, die sich wirklich aendert.
+ */
 
 /* ============================================================== Schaltflaechen */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -11,39 +17,68 @@
   padding: var(--s2) var(--s4);
   background: var(--surface-hi);
   color: var(--text);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   font-size: var(--t-sm);
-  font-weight: 500;
+  font-weight: 520;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   cursor: pointer;
-  /* Nie "all" animieren - nur was sich wirklich aendert. */
+  box-shadow: var(--shadow-sm), inset 0 1px 0 0 var(--line-top);
   transition: background-color var(--dur) var(--ease),
               border-color var(--dur) var(--ease),
               color var(--dur) var(--ease),
+              box-shadow var(--dur) var(--ease),
               transform var(--dur-fast) var(--ease);
   /* Verhindert die 300ms-Verzoegerung auf Beruehrgeraeten. */
   touch-action: manipulation;
 }
-.btn:hover:not(:disabled) { background: var(--surface-max); border-color: var(--line-strong); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:hover:not(:disabled) {
+  background: var(--surface-max);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow), inset 0 1px 0 0 var(--line-top);
+}
+/* Der Knopf gibt beim Druecken nach — ein Pixel reicht, mehr wirkt billig. */
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: var(--shadow-sm); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 
 .btn-primary {
-  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent));
+  border-color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 600;
+  box-shadow: var(--shadow-sm), 0 0 0 0 var(--accent-glow);
 }
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--accent-hover), var(--accent-hover));
+  border-color: var(--accent-hover);
+  box-shadow: var(--shadow), 0 0 24px -6px var(--accent);
+}
 
 /* Gruen heisst "loslegen": herunterladen, starten. */
-.btn-go { background: var(--go); border-color: var(--go); color: var(--go-ink); font-weight: 600; }
-.btn-go:hover:not(:disabled) { background: var(--go-hover); border-color: var(--go-hover); }
+.btn-go {
+  background: linear-gradient(180deg, var(--go-hover), var(--go));
+  border-color: var(--go); color: var(--go-ink); font-weight: 600;
+}
+.btn-go:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--go-hover), var(--go-hover));
+  border-color: var(--go-hover);
+  box-shadow: var(--shadow), 0 0 24px -6px var(--go);
+}
 
-.btn-danger { background: var(--err-dim); border-color: #6a2b2f; color: var(--err-hover); }
-.btn-danger:hover:not(:disabled) { background: #5a2327; border-color: var(--err); }
+.btn-danger { background: var(--err-soft); border-color: var(--err-line); color: var(--err-hover); }
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--err) 22%, transparent);
+  border-color: var(--err); color: var(--text-strong);
+}
 
-.btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
-.btn-ghost:hover:not(:disabled) { background: var(--surface-hi); color: var(--text); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); box-shadow: none; }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-hi); color: var(--text); box-shadow: none; }
+
+/* Aktiver Umschaltknopf — traegt aria-pressed="true" im Markup. */
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent);
+}
 
 .btn-sm { min-height: var(--tap-compact); padding: var(--s1) var(--s3); font-size: var(--t-xs); }
 
@@ -61,13 +96,24 @@
 
 /* ============================================================== Karten */
 .card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
   padding: var(--s4);
   margin-bottom: var(--s4);
+  box-shadow: var(--shadow-sm);
+}
+/* Die Haarlinie oben. Sie ist der Unterschied zwischen "Rechteck in einer
+ * anderen Farbe" und "Flaeche, die vor dem Grund liegt". */
+.card::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-top) 18%, var(--line-top) 82%, transparent);
+  border-radius: var(--r) var(--r) 0 0;
+  pointer-events: none;
 }
 .card > h3 { margin-bottom: var(--s3); }
+.card > h3:not(:first-child) { margin-top: var(--s5); }
 .card-flush { padding: 0; overflow: hidden; }
 .card-flush > h3 { padding: var(--s4) var(--s4) 0; margin-bottom: var(--s3); }
 
@@ -79,14 +125,24 @@
 /* ============================================================== Kennzahlen */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--s3); margin-bottom: var(--s4); }
 .tile {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
   padding: var(--s3) var(--s4);
-  transition: border-color var(--dur) var(--ease);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
-.tile-label { color: var(--text-muted); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.06em; }
-.tile-value { font-size: var(--t-xl); font-weight: 620; margin-top: 2px; }
+.tile::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-top) 20%, var(--line-top) 80%, transparent);
+  pointer-events: none;
+}
+.tile-label { color: var(--text-faint); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: var(--track-wide); }
+.tile-value {
+  font-size: var(--t-xl); font-weight: 640; margin-top: 3px;
+  letter-spacing: var(--track-tight); color: var(--text-strong);
+}
 .tile-sub { color: var(--text-muted); font-size: var(--t-xs); margin-top: 2px; }
 .tile-ok   .tile-value { color: var(--go); }
 .tile-warn .tile-value { color: var(--warn); }
@@ -95,56 +151,80 @@
 /* ============================================================== Listen */
 .list {
   display: grid; gap: 1px;
+  /* minmax(0, 1fr) statt der automatischen Spalte: sonst richtet sich die
+     Spaltenbreite nach der breitesten Zeile und die Liste waechst ueber
+     ihren Behaelter hinaus, statt den Inhalt zu kuerzen. Faellt erst auf
+     schmalen Bildschirmen auf, und dort dann sofort. */
+  grid-template-columns: minmax(0, 1fr);
   background: var(--line);
   border-radius: var(--r-sm);
   overflow: hidden;
 }
 .item {
+  position: relative;
   display: flex; gap: var(--s3); align-items: center; justify-content: space-between;
   background: var(--surface);
   padding: var(--s2) var(--s3);
+  min-height: var(--tap-compact);
   font-size: var(--t-sm);
   transition: background-color var(--dur-fast) var(--ease);
 }
 .item:hover { background: var(--surface-hi); }
+/* Ein farbiger Streifen links, der beim Ueberfahren einlaeuft. Zeigt, welche
+ * Zeile gemeint ist, ohne die ganze Zeile umzufaerben. */
+.item::after {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+  background: var(--accent);
+  transform: scaleY(0); transform-origin: center;
+  transition: transform var(--dur) var(--ease);
+}
+.item:hover::after { transform: scaleY(1); }
 /* min-width: 0 ist noetig, damit truncate in einem Flex-Kind greift. */
 .item-main { min-width: 0; flex: 1; }
-.item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-title { font-weight: 520; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-sub { color: var(--text-muted); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-side { display: flex; gap: var(--s2); align-items: center; flex: none; }
 
 /* ============================================================== Plaketten */
 .pill {
   display: inline-flex; align-items: center; gap: var(--s1);
-  padding: 2px var(--s2);
+  padding: 3px var(--s2);
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   background: var(--bg-sunken);
   color: var(--text-muted);
   font-size: var(--t-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 520;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
-.pill-ok   { color: var(--go);     border-color: var(--go-dim); }
-.pill-warn { color: var(--warn);   border-color: var(--warn-dim); }
-.pill-err  { color: var(--err);    border-color: var(--err-dim); }
-.pill-busy { color: var(--accent); border-color: var(--accent-dim); }
+.pill-ok   { color: var(--go);     border-color: var(--go-line);     background: var(--go-soft); }
+.pill-warn { color: var(--warn);   border-color: var(--warn-line);   background: var(--warn-soft); }
+.pill-err  { color: var(--err);    border-color: var(--err-line);    background: var(--err-soft); }
+.pill-busy { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+/* Etwas, das gerade laeuft, pulsiert leise — man sieht auf einen Blick,
+ * dass sich noch etwas tut. */
+.pill-busy::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: currentColor; animation: puls 1.8s ease-in-out infinite;
+}
+@keyframes puls { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .pill-busy::before { animation: none; } }
 
 /* ============================================================== Hinweise */
 .notice {
   display: flex; gap: var(--s3); align-items: flex-start;
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  border: 1px solid var(--accent-dim);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
   border-left-width: 3px;
   border-radius: var(--r-sm);
   padding: var(--s3) var(--s4);
   margin-bottom: var(--s4);
   font-size: var(--t-sm);
 }
-.notice-warn { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border-color: var(--warn-dim); }
-.notice-err  { background: color-mix(in srgb, var(--err)  10%, var(--surface)); border-color: var(--err-dim); }
-.notice svg { flex: none; width: 1.15rem; height: 1.15rem; margin-top: 1px; }
+.notice-warn { background: var(--warn-soft); border-color: var(--warn-line); }
+.notice-err  { background: var(--err-soft);  border-color: var(--err-line); }
+.notice svg { flex: none; width: 1.15rem; height: 1.15rem; margin-top: 1px; color: var(--accent); }
 .notice-warn svg { color: var(--warn); }
 .notice-err svg  { color: var(--err); }
 
@@ -171,34 +251,37 @@
   color: var(--text-muted);
   font-size: var(--t-sm);
 }
-.empty svg, .failure svg { width: 1.75rem; height: 1.75rem; opacity: 0.6; }
+.empty svg, .failure svg { width: 1.75rem; height: 1.75rem; opacity: 0.5; }
 .failure { color: var(--err); }
 .empty p, .failure p { max-width: 42ch; margin: 0; }
 
 /* ============================================================== Fortschritt */
 .bar {
-  width: 7rem; height: 5px; flex: none;
-  background: var(--line);
+  width: 7rem; height: 6px; flex: none;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
   border-radius: var(--r-pill);
   overflow: hidden;
 }
 .bar > span {
   display: block; height: 100%;
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
   border-radius: inherit;
-  transition: width var(--dur-slow) var(--ease);
+  transition: width var(--dur-slow) var(--ease-out);
 }
-.bar-go > span { background: var(--go); }
+.bar-go > span { background: linear-gradient(90deg, var(--go), var(--go-hover)); }
 
 /* ============================================================== Tabellen */
 table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
 th, td { text-align: left; padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); }
 th {
-  color: var(--text-muted); font-weight: 500; font-size: var(--t-xs);
-  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); font-weight: 600; font-size: var(--t-xs);
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  background: var(--bg-sunken);
 }
+tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: var(--surface-hi); }
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; border-radius: var(--r-sm); }
 
 /* ============================================================== Meldungen */
 .toasts {
@@ -209,24 +292,154 @@ tbody tr:hover { background: var(--surface-hi); }
 }
 .toast {
   display: flex; gap: var(--s2); align-items: flex-start;
-  background: var(--surface-hi);
-  border: 1px solid var(--line);
+  background: var(--surface-max);
+  border: 1px solid var(--line-strong);
   border-left: 3px solid var(--accent);
   border-radius: var(--r-sm);
   padding: var(--s3);
   font-size: var(--t-sm);
-  box-shadow: var(--shadow-lg);
-  animation: toast-in var(--dur) var(--ease);
+  box-shadow: var(--shadow-pop);
+  animation: toast-in var(--dur-slow) var(--ease-out);
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(0.75rem) scale(0.97); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
 .toast-ok  { border-left-color: var(--go); }
 .toast-err { border-left-color: var(--err); }
 
+/* ============================================================== Werkzeugleiste
+ * Der Streifen ueber jeder Liste: Suche, Sortierung, Ansicht, Einstellungen.
+ * Ein Modul baut ihn nicht selbst zusammen, sondern bekommt ihn aus
+ * core/toolbar.js — sonst sieht jede Seite anders aus. */
+.toolbar {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-sm);
+}
+.toolbar-grow { flex: 1; min-width: 9rem; }
+.toolbar-sep { width: 1px; align-self: stretch; background: var(--line); margin-inline: var(--s1); }
+/* Eingaben sind sonst 100 % breit — in einer Leiste soll jedes Feld nur so
+   viel nehmen, wie es braucht, damit alles in eine Zeile passt. */
+.toolbar select, .toolbar input[type="number"] {
+  width: auto; flex: none;
+  min-height: var(--tap-compact);
+  font-size: var(--t-xs);
+  padding-block: 0;
+}
+.toolbar .btn { flex: none; }
+/* Suchfeld mit Lupe davor. */
+.field-search { position: relative; flex: 1; min-width: 10rem; }
+.field-search > svg {
+  position: absolute; left: var(--s3); top: 50%; translate: 0 -50%;
+  width: 0.9rem; height: 0.9rem; color: var(--text-faint); pointer-events: none;
+}
+.field-search > input { padding-left: calc(var(--s3) * 2 + 0.9rem); }
+
+/* ============================================================== Segmentwahl
+ * Zwei bis vier Moeglichkeiten, von denen genau eine gilt. Besser als ein
+ * Auswahlfeld, wenn alle Optionen kurz sind: man sieht sofort, was es gibt. */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  gap: 2px;
+}
+.segmented > button {
+  min-height: calc(var(--tap-compact) - 6px);
+  padding: 0 var(--s3);
+  background: transparent; border: 0; border-radius: var(--r-xs);
+  color: var(--text-muted); font-size: var(--t-xs); font-weight: 520;
+  cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: var(--s2);
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.segmented > button svg { width: 0.9rem; height: 0.9rem; }
+.segmented > button:hover { color: var(--text); background: var(--surface-hi); }
+.segmented > button[aria-pressed="true"] {
+  background: var(--surface-max); color: var(--text-strong);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 0 var(--line-top);
+}
+
+/* ============================================================== Klappmenue
+ * Popover fuer Einstellungen je Modul. Kein <dialog>: es soll den Rest der
+ * Seite nicht sperren, man klickt daneben und es ist zu. */
+.menu-wrap { position: relative; display: inline-flex; }
+.menu {
+  position: absolute; top: calc(100% + var(--s2)); right: 0;
+  z-index: var(--z-menu);
+  min-width: 16rem; max-width: min(22rem, calc(100vw - 2rem));
+  padding: var(--s3);
+  background: var(--surface-max);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-pop);
+  display: grid; gap: var(--s3);
+  animation: menu-in var(--dur) var(--ease-out);
+}
+.menu-left { right: auto; left: 0; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-0.4rem) scale(0.98); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .menu { animation: none; } }
+.menu h4 {
+  margin: 0; font-size: var(--t-xs); font-weight: 600; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+}
+.menu hr { margin: 0; }
+/* Eine Einstellung: Beschriftung links, Bedienelement rechts. */
+.setting {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  font-size: var(--t-sm); color: var(--text);
+}
+.setting > .setting-label { min-width: 0; }
+.setting-label > span { display: block; }
+.setting-hint { color: var(--text-faint); font-size: var(--t-xs); }
+.setting > select, .setting > input[type="number"] { width: auto; min-width: 7rem; flex: none; }
+/* Ganze Zeile klickbar, wenn das Bedienelement ein Kaestchen ist. */
+label.setting { cursor: pointer; min-height: var(--tap-compact); }
+label.setting > input[type="checkbox"] { flex: none; }
+
+/* ============================================================== Schieber
+ * Kaestchen sehen in einer Einstellungsliste nach Formular aus. Ein
+ * Schieber sieht nach Schalter aus — und genau das ist es. */
+.switch {
+  position: relative; flex: none;
+  width: 2.4rem; height: 1.35rem;
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.switch::after {
+  content: ""; position: absolute; top: 1px; left: 1px;
+  width: 1.05rem; height: 1.05rem;
+  background: var(--text-faint);
+  border-radius: 50%;
+  transition: transform var(--dur) var(--ease-out), background-color var(--dur) var(--ease);
+}
+.switch:checked { background: var(--accent); border-color: var(--accent); }
+.switch:checked::after { transform: translateX(1.05rem); background: var(--accent-ink); }
+
+/* ============================================================== Tastenkuerzel */
+kbd {
+  display: inline-block;
+  min-width: 1.5rem; padding: 1px var(--s2);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  font-size: var(--t-xs); text-align: center; color: var(--text-muted);
+}
+
 /* ============================================================== Cover-Raster */
 .grid-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--cover), 1fr));
   gap: var(--s4);
 }
 .cover-card {
@@ -243,81 +456,144 @@ tbody tr:hover { background: var(--surface-hi); }
   overflow: hidden;
   background: var(--surface-hi);
   box-shadow: var(--shadow);
+  transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease-out);
 }
-.cover-art img { width: 100%; height: 100%; object-fit: cover; }
+.cover-art::after {
+  content: ""; position: absolute; inset: 0;
+  border: 1px solid var(--line-top);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.cover-art img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-slow) var(--ease-out); }
+.cover-card:hover .cover-art,
+.cover-card:focus-visible .cover-art { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
 .cover-card:hover .cover-art img,
-.cover-card:focus-visible .cover-art img { transform: scale(1.04); }
-.cover-art img { transition: transform var(--dur-slow) var(--ease); }
+.cover-card:focus-visible .cover-art img { transform: scale(1.05); }
 .cover-round .cover-art { border-radius: var(--r-pill); }
-.cover-title { font-size: var(--t-sm); font-weight: 500; }
+.cover-title { font-size: var(--t-sm); font-weight: 520; }
 .cover-sub { font-size: var(--t-xs); color: var(--text-muted); }
 .cover-title, .cover-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Abspielknopf ueber dem Cover, erscheint bei Hover und Tastaturfokus. */
 .cover-play {
   position: absolute; inset: auto var(--s2) var(--s2) auto;
-  width: 2.25rem; height: 2.25rem;
+  width: 2.4rem; height: 2.4rem;
   display: grid; place-items: center;
   background: var(--go); color: var(--go-ink);
   border: 0; border-radius: var(--r-pill);
   cursor: pointer;
-  opacity: 0; transform: translateY(0.4rem);
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
-  box-shadow: var(--shadow);
+  opacity: 0; transform: translateY(0.5rem) scale(0.9);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease-out);
+  box-shadow: var(--shadow-lg);
 }
 .cover-card:hover .cover-play,
 .cover-card:focus-within .cover-play,
 .cover-play:focus-visible { opacity: 1; transform: none; }
 .cover-play svg { width: 1.1rem; height: 1.1rem; }
 
+/* Listenansicht statt Raster — die Umschaltung in der Werkzeugleiste.
+   Das Bild ueberspannt beide Zeilen, sonst bleibt neben ihm eine leere
+   Rasterzelle stehen und die Zeile wird doppelt so hoch wie noetig. */
+.grid-cards.as-list {
+  grid-template-columns: 1fr; gap: 1px;
+  background: var(--line); border-radius: var(--r-sm); overflow: hidden;
+}
+.as-list .cover-card {
+  grid-template-columns: 2.5rem 1fr;
+  grid-template-rows: auto auto;
+  align-content: center;
+  column-gap: var(--s3); row-gap: 0;
+  padding: var(--s2) var(--s3);
+  background: var(--surface);
+  min-height: var(--tap-compact);
+}
+.as-list .cover-art {
+  grid-row: 1 / span 2; align-self: center;
+  width: 2.5rem; border-radius: var(--r-xs); box-shadow: none;
+}
+.as-list .cover-card:hover { background: var(--surface-hi); }
+.as-list .cover-card:hover .cover-art { transform: none; box-shadow: none; }
+.as-list .cover-card:hover .cover-art img { transform: none; }
+.as-list .cover-play { display: none; }
+.as-list .cover-title, .as-list .cover-sub { grid-column: 2; align-self: center; }
+
 /* ============================================================== Kopfbereich */
 .hero {
+  position: relative;
   display: flex; gap: var(--s5); align-items: flex-end;
   padding: var(--s5);
   margin-bottom: var(--s5);
+  overflow: hidden;
   background:
-    linear-gradient(to top, var(--surface), color-mix(in srgb, var(--accent) 12%, var(--surface)));
+    radial-gradient(60% 120% at 12% 0%, var(--accent-soft), transparent 70%),
+    linear-gradient(to top, var(--surface), var(--surface-hi));
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+}
+.hero::before {
+  content: ""; position: absolute; inset: 0 0 auto; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-top) 15%, var(--line-top) 85%, transparent);
 }
 .hero-art {
-  width: 10rem; height: 10rem; flex: none;
+  width: 11rem; height: 11rem; flex: none;
   border-radius: var(--r); overflow: hidden;
   background: var(--surface-hi); box-shadow: var(--shadow-lg);
 }
 .hero-art img { width: 100%; height: 100%; object-fit: cover; }
 .hero-round .hero-art { border-radius: var(--r-pill); }
 .hero-body { min-width: 0; }
-.hero-kind { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
-.hero-title { font-size: var(--t-2xl); margin: var(--s1) 0 var(--s2); }
+.hero-kind { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: var(--track-wide); color: var(--accent); font-weight: 600; }
+.hero-title { font-size: var(--t-3xl); margin: var(--s2) 0; letter-spacing: -0.03em; }
 .hero-meta { color: var(--text-muted); font-size: var(--t-sm); }
 
 @media (max-width: 40rem) {
-  .hero { flex-direction: column; align-items: flex-start; gap: var(--s4); }
-  .hero-art { width: 7rem; height: 7rem; }
+  .hero { flex-direction: column; align-items: flex-start; gap: var(--s4); padding: var(--s4); }
+  .hero-art { width: 7.5rem; height: 7.5rem; }
+  .hero-title { font-size: var(--t-2xl); }
 }
 
 /* ============================================================== Titelliste */
-.tracklist { display: grid; gap: 1px; background: var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.tracklist {
+  display: grid; gap: 1px;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--line); border-radius: var(--r-sm); overflow: hidden;
+}
 .track {
+  position: relative;
   display: grid;
   grid-template-columns: 2.5rem 1fr auto auto;
   gap: var(--s3); align-items: center;
   background: var(--surface);
   padding: var(--s2) var(--s3);
+  min-height: var(--tap-compact);
   font-size: var(--t-sm);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 .track:hover { background: var(--surface-hi); }
 .track-no { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
 .track-main { min-width: 0; }
+.track-title { font-weight: 520; }
 .track-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .track-actions { display: flex; gap: var(--s1); align-items: center; }
+.track.is-playing { background: var(--go-soft); }
 .track.is-playing .track-no,
 .track.is-playing .track-title { color: var(--go); }
+/* Die laufende Zeile bekommt einen Streifen — man findet sie in einer
+ * langen Liste sofort wieder. */
+.track.is-playing::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--go);
+}
 
 @media (max-width: 34rem) {
   .track { grid-template-columns: 2rem 1fr auto; }
   .track-time { display: none; }
+
+  /* Zeilen mit zwei Knoepfen passen nicht mehr nebeneinander. Umbrechen
+     ist besser als abschneiden - der Knopf muss erreichbar bleiben. */
+  .item { flex-wrap: wrap; row-gap: var(--s2); }
+  .item-main { flex: 1 1 100%; }
+  .item-side { flex-wrap: wrap; }
 }
 
 /* ============================================================== Abstände
@@ -337,8 +613,9 @@ tbody tr:hover { background: var(--surface-hi); }
   margin: var(--s2) 0;
   padding: var(--s3);
   background: var(--bg-sunken);
-  border: 1px dashed var(--line);
+  border: 1px dashed var(--line-strong);
   border-radius: var(--r-sm);
+  color: var(--go);
   user-select: all;
 }
 
@@ -347,8 +624,11 @@ tbody tr:hover { background: var(--surface-hi); }
 
 /* Kopfzeile einer Duplikatgruppe und der Titel, der bleiben soll. */
 .item-head { background: var(--surface-hi); }
-.item-keeper { background: color-mix(in srgb, var(--go) 8%, var(--surface)); }
+.item-keeper { background: var(--go-soft); }
 
 /* Schmale Zahlenfelder in der Tag-Werkstatt (Jahr, Titelnummer). */
 .field-narrow { max-width: 6rem; }
 .field-wide { max-width: 12rem; }
+
+/* Rechter Block der Werkzeugleiste — schiebt sich ans Ende. */
+.toolbar-right { margin-left: auto; }

@@ -1,103 +1,171 @@
 /* Gestaltungsmerkmale an genau einer Stelle.
  *
- * Vorher standen Farben und Abstaende als Einzelwerte quer durch das
- * Stylesheet - jede Aenderung war Suchen und Ersetzen. Hier ist alles
- * benannt und einmal definiert.
+ * Alles, was zweimal vorkommen koennte, ist hier benannt: Farben, Abstaende,
+ * Radien, Tiefe, Bewegung. Eine Aenderung an der Optik ist eine Aenderung in
+ * dieser Datei — nicht Suchen und Ersetzen durch das ganze Stylesheet.
  *
- * Die Palette folgt der Empfehlung der ui-ux-pro-max-Skill fuer
- * "Dark Mode (OLED)": Slate-Stufen mit hohem Kontrast, dazu Gruen fuer
- * ausloesende Aktionen. Bewusst NICHT uebernommen wurde die vorgeschlagene
- * Google-Schrift - sie wuerde externe Hosts erfordern und damit die
- * Content-Security-Policy aufweichen. Systemschriften kosten nichts und
- * sind sofort da.
+ * Die Richtung folgt der Empfehlung der ui-ux-pro-max-Skill fuer "Dark Mode
+ * (OLED)": sehr dunkler, leicht blaustichiger Grund, hoher Kontrast, Gruen
+ * fuer ausloesende Aktionen. Die dort ebenfalls empfohlene Schrift liegt
+ * jetzt im Image (siehe fonts.css) statt bei Google.
+ *
+ * Drei Dinge sind hier einstellbar und werden am <html>-Element gesetzt:
+ *   data-dichte  = kompakt | normal | luftig
+ *   data-akzent  = blau | violett | tuerkis | bernstein
+ *   data-bewegung= voll | reduziert
+ * Die Oberflaeche schreibt sie, dieses Stylesheet setzt sie um. So bleibt
+ * die Einstellung eine Zeile in localStorage und keine zweite Codebasis.
  */
 
 :root {
   color-scheme: dark;
 
-  /* --- Flaechen, von tief nach hoch ------------------------------------ */
-  --bg:            #0b1220;   /* Seitengrund */
-  --bg-sunken:     #070d18;   /* Eingaben, Codefelder */
-  --surface:       #111b2d;   /* Karten */
-  --surface-hi:    #17253c;   /* Hover, hervorgehobene Zeilen */
-  --surface-max:   #1e3050;   /* aktive Auswahl */
-  --line:          #24334d;
-  --line-strong:   #33456a;
+  /* --- Flaechen, von tief nach hoch -------------------------------------
+   * Sechs Stufen statt drei. Der Unterschied zwischen "Karte" und "Zeile
+   * darin, ueber der die Maus steht" muss sichtbar sein, ohne dass eine
+   * Seite wie ein Schachbrett wirkt — deshalb kleine Schritte.            */
+  --bg-deep:       #05080f;   /* ganz aussen, hinter allem */
+  --bg:            #080d17;   /* Seitengrund */
+  --bg-sunken:     #05090f;   /* Eingaben, Codefelder */
+  --surface:       #0e1526;   /* Karten */
+  --surface-hi:    #141d33;   /* Hover, hervorgehobene Zeilen */
+  --surface-max:   #1b2745;   /* aktive Auswahl */
 
-  /* --- Schrift ---------------------------------------------------------- */
-  --text:          #e9eff8;
-  --text-muted:    #93a4bf;
-  --text-faint:    #64748b;
+  /* Linien in zwei Staerken: eine, die nur trennt, und eine, die begrenzt. */
+  --line:          #1c2740;
+  --line-strong:   #2c3b5d;
+  /* Haarlinie am oberen Rand erhabener Flaechen. Der Trick, der einer
+   * Karte Koerper gibt, ohne dass man den Grund fuer Tiefe haelt. */
+  --line-top:      #ffffff14;
+
+  /* --- Schrift ----------------------------------------------------------
+   * Vier Stufen. Alles ueber --text-faint hinaus waere auf diesem Grund
+   * unter dem Kontrastminimum von 4,5:1.                                  */
+  --text:          #eef3fb;
+  --text-strong:   #ffffff;
+  --text-muted:    #9aabc6;
+  --text-faint:    #6b7c99;
 
   /* --- Bedeutungsfarben -------------------------------------------------
-   * accent  = Navigation und neutrale Hauptaktionen
-   * go      = etwas anstoßen (Download, Start) - dafuer Gruen, weil es
-   *           genau die Bedeutung "loslegen" traegt
-   * warn/err= Zustaende, nicht Dekoration                                */
-  --accent:        #4c8dff;
-  --accent-hover:  #6ba1ff;
-  --accent-dim:    #1d3a6b;
-  --accent-ink:    #06122a;
+   * accent = Navigation und neutrale Hauptaktionen
+   * go     = etwas anstossen (Download, Start). Gruen, weil es genau die
+   *          Bedeutung "loslegen" traegt — nicht zur Dekoration.
+   * warn/err = Zustaende.                                                 */
+  --accent:        #5b8cff;
+  --accent-hover:  #7ba4ff;
+  --accent-soft:   #5b8cff1f;   /* Flaeche hinter aktiver Navigation */
+  --accent-line:   #5b8cff4d;
+  --accent-glow:   #5b8cff33;
+  --accent-ink:    #04101f;
 
   --go:            #22c55e;
-  --go-hover:      #3ad672;
-  --go-dim:        #14532d;
+  --go-hover:      #34d873;
+  --go-soft:       #22c55e1a;
+  --go-line:       #22c55e4d;
   --go-ink:        #04240f;
 
-  --warn:          #f0b429;
-  --warn-dim:      #4a3a11;
-  --err:           #f2555a;
-  --err-hover:     #ff7377;
-  --err-dim:       #4a1d20;
+  --warn:          #f5b73c;
+  --warn-soft:     #f5b73c1a;
+  --warn-line:     #f5b73c4d;
 
-  /* --- Abstandsskala (4er-Raster) --------------------------------------- */
-  --s1: 0.25rem;  --s2: 0.5rem;   --s3: 0.75rem;  --s4: 1rem;
-  --s5: 1.5rem;   --s6: 2rem;     --s7: 3rem;     --s8: 4rem;
+  --err:           #ff5f68;
+  --err-hover:     #ff7d85;
+  --err-soft:      #ff5f681a;
+  --err-line:      #ff5f684d;
+
+  /* --- Abstandsskala (4er-Raster) ---------------------------------------
+   * --raum ist der Faktor, an dem die Dichte-Einstellung dreht. Alle
+   * Abstaende haengen daran, deshalb aendert eine Zahl die ganze Seite.   */
+  --raum: 1;
+  --s1: calc(0.25rem * var(--raum));
+  --s2: calc(0.5rem  * var(--raum));
+  --s3: calc(0.75rem * var(--raum));
+  --s4: calc(1rem    * var(--raum));
+  --s5: calc(1.5rem  * var(--raum));
+  --s6: calc(2rem    * var(--raum));
+  --s7: calc(3rem    * var(--raum));
+  --s8: calc(4rem    * var(--raum));
 
   /* --- Radien ------------------------------------------------------------ */
-  --r-sm: 6px;  --r: 10px;  --r-lg: 14px;  --r-pill: 999px;
+  --r-xs: 5px;  --r-sm: 8px;  --r: 12px;  --r-lg: 16px;  --r-xl: 22px;
+  --r-pill: 999px;
 
-  /* --- Schatten ---------------------------------------------------------- */
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow:    0 4px 16px rgb(0 0 0 / 40%);
-  --shadow-lg: 0 12px 40px rgb(0 0 0 / 55%);
+  /* --- Tiefe -------------------------------------------------------------
+   * Zwei Schatten je Stufe: ein enger, der die Kante setzt, und ein
+   * weiter, der die Flaeche hebt. Ein einzelner Schatten sieht auf dunklem
+   * Grund immer nach Schmutz aus.                                         */
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 50%);
+  --shadow:    0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px -8px rgb(0 0 0 / 60%);
+  --shadow-lg: 0 2px 4px rgb(0 0 0 / 40%), 0 24px 60px -16px rgb(0 0 0 / 70%);
+  --shadow-pop: 0 2px 6px rgb(0 0 0 / 50%), 0 16px 48px -12px rgb(0 0 0 / 80%);
 
-  /* --- Typografie --------------------------------------------------------
-   * Zwei Familien nach dem Vorschlag "technisch/Daten": eine Proportionale
-   * fuer Text, eine Dickengleiche fuer Zahlen, Pfade und Protokolle.      */
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+  /* --- Typografie -------------------------------------------------------
+   * Eine Proportionale fuer Text, eine Dickengleiche fuer Zahlen, Pfade und
+   * Protokolle. Die Systemschriften bleiben als Ersatz stehen: faellt eine
+   * Datei aus, sieht es schlichter aus statt kaputt.                      */
+  --font: "Inter var", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono var", ui-monospace, "Cascadia Code", "SF Mono",
+          Consolas, monospace;
 
-  --t-xs: 0.72rem;  --t-sm: 0.82rem;  --t-md: 0.9rem;
-  --t-lg: 1.05rem;  --t-xl: 1.35rem;  --t-2xl: 1.75rem;
+  --t-xs: 0.72rem;  --t-sm: 0.8rem;   --t-md: 0.875rem;
+  --t-lg: 1rem;     --t-xl: 1.3rem;   --t-2xl: 1.7rem;  --t-3xl: 2.2rem;
 
-  --lh-tight: 1.25;
-  --lh:       1.55;   /* Richtwert 1.5-1.75 fuer Fließtext */
+  --lh-tight: 1.2;
+  --lh:       1.6;
+
+  /* Enger gesetzte Ueberschriften wirken gesetzt statt getippt. */
+  --track-tight: -0.02em;
+  --track-wide:  0.08em;
 
   /* --- Bewegung ----------------------------------------------------------
-   * 150-300 ms, wie in der Pruefliste gefordert. Nie "all" animieren,
-   * sondern die konkrete Eigenschaft - das steht in den Regeln und spart
-   * dem Browser unnoetige Arbeit.                                          */
-  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+   * 120-320 ms. Nie "all" animieren, sondern die konkrete Eigenschaft.    */
+  --ease:     cubic-bezier(0.2, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 120ms;
   --dur:      200ms;
   --dur-slow: 320ms;
 
-  /* --- Stapelordnung -----------------------------------------------------
-   * Feste Stufen statt gewachsener z-index-Zahlen.                        */
-  --z-base: 1;  --z-sticky: 10;  --z-player: 20;  --z-overlay: 30;
-  --z-toast: 50;
+  /* --- Stapelordnung ----------------------------------------------------- */
+  --z-base: 1;  --z-sticky: 10;  --z-player: 20;  --z-menu: 40;
+  --z-overlay: 60;  --z-toast: 80;
 
-  /* --- Maße --------------------------------------------------------------- */
-  --sidebar-w: 15rem;
-  --content-max: 84rem;
-  --tap: 2.75rem;      /* 44px Mindestgröße fuer Beruehrziele */
+  /* --- Masse -------------------------------------------------------------- */
+  --sidebar-w: 15.5rem;
+  --content-max: 88rem;
+  --tap: 2.75rem;          /* 44px Mindestgroesse fuer Beruehrziele */
   --tap-compact: 2.25rem;
+  --cover: 168px;          /* Kantenlaenge im Cover-Raster */
 }
 
-/* Wer Bewegung reduziert haben will, bekommt sie nicht aufgedraengt.
- * Nicht auf 0 setzen: 1ms haelt Ablauflogik intakt, die auf
- * transitionend wartet. */
+/* --- Dichte ---------------------------------------------------------------
+ * Kompakt bringt mehr Zeilen auf den Schirm, luftig macht es ruhiger. Die
+ * Beruehrziele schrumpfen dabei nicht unter das Minimum — Dichte darf die
+ * Bedienbarkeit nicht kosten.                                              */
+:root[data-dichte="kompakt"] { --raum: 0.8; --t-md: 0.84rem; --lh: 1.5; }
+:root[data-dichte="luftig"]  { --raum: 1.25; --lh: 1.7; --cover: 190px; }
+
+/* --- Akzentfarbe ----------------------------------------------------------
+ * Nur die Navigations- und Hauptaktionsfarbe wechselt. Gruen (loslegen),
+ * Gelb (Hinweis) und Rot (Fehler) bleiben, wo sie sind: sie tragen
+ * Bedeutung und sind keine Geschmacksfrage.                               */
+:root[data-akzent="violett"] {
+  --accent: #a06bff; --accent-hover: #b98bff; --accent-soft: #a06bff1f;
+  --accent-line: #a06bff4d; --accent-glow: #a06bff33; --accent-ink: #100420;
+}
+:root[data-akzent="tuerkis"] {
+  --accent: #2dd4bf; --accent-hover: #5ce4d3; --accent-soft: #2dd4bf1f;
+  --accent-line: #2dd4bf4d; --accent-glow: #2dd4bf33; --accent-ink: #032420;
+}
+:root[data-akzent="bernstein"] {
+  --accent: #fb923c; --accent-hover: #fdb474; --accent-soft: #fb923c1f;
+  --accent-line: #fb923c4d; --accent-glow: #fb923c33; --accent-ink: #241202;
+}
+
+/* --- Bewegung abschalten --------------------------------------------------
+ * Zweimal: einmal, weil das Betriebssystem es sagt, und einmal, weil der
+ * Benutzer es hier eingestellt hat. Nicht auf 0 setzen — 1 ms haelt
+ * Ablauflogik intakt, die auf transitionend wartet.                       */
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-fast: 1ms; --dur: 1ms; --dur-slow: 1ms; }
 }
+:root[data-bewegung="reduziert"] { --dur-fast: 1ms; --dur: 1ms; --dur-slow: 1ms; }

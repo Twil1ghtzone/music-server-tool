@@ -2,6 +2,7 @@
 
 import { get, post } from '../core/api.js';
 import { $, $$, esc, bytes, num, tile, icon, empty, failure, skeleton } from '../core/dom.js';
+import { werkzeugleiste, anwenden as filtern } from '../core/toolbar.js';
 import { ok, fail } from '../core/toast.js';
 
 export const meta = { id: 'dupes', titel: 'Duplikate' };
@@ -28,7 +29,46 @@ export async function mount(wurzel) {
     </div></div>
 
     <div class="tiles" id="d-summary"></div>
+    <div id="d-leiste"></div>
     <div id="d-list">${skeleton(3)}</div>`;
+
+  let gruppen = [];
+
+  const leiste = werkzeugleiste({
+    id: 'dupes',
+    standard: { q: '', art: 'alle', sort: 'wasted', richtung: 'ab', pfade: true, alleWaehlen: false },
+    suche: { platzhalter: 'Nach Pfad, Titel oder Interpret filtern…', label: 'Duplikate filtern' },
+    filter: [{ name: 'art', label: 'Nach Art filtern', werte: [
+      ['alle', 'Alle Arten'], ['bytes', 'Gleiche Bytes'],
+      ['audio', 'Gleiche Musik'], ['acoustic', 'Gleiche Aufnahme'],
+    ] }],
+    sortierung: [['wasted', 'Rückgewinnbar'], ['files', 'Dateien'], ['id', 'Nummer']],
+    zusatz: [
+      { name: 'pfade', art: 'schalter', label: 'Vollständige Pfade zeigen',
+        hinweis: 'Aus­geschaltet erscheint nur der Dateiname' },
+    ],
+    beiAenderung: () => zeichne(),
+  });
+  $('#d-leiste').replaceWith(leiste.el);
+
+  // Alle sichtbaren Gruppen auf einmal auswählen — bei dreißig Gruppen ist
+  // jede einzeln anzuklicken keine Bedienung mehr.
+  const alleKnopf = document.createElement('button');
+  alleKnopf.type = 'button';
+  alleKnopf.className = 'btn btn-sm';
+  alleKnopf.textContent = 'Alle sichtbaren wählen';
+  alleKnopf.addEventListener('click', () => {
+    const kaesten = $$('#d-list [data-select]');
+    const allesAn = kaesten.every((k) => k.checked);
+    for (const k of kaesten) {
+      k.checked = !allesAn;
+      const id = Number(k.dataset.select);
+      if (k.checked) ausgewaehlt.add(id); else ausgewaehlt.delete(id);
+    }
+    alleKnopf.textContent = allesAn ? 'Alle sichtbaren wählen' : 'Auswahl aufheben';
+    knopfStand();
+  });
+  leiste.el.querySelector('.toolbar-right').prepend(alleKnopf);
 
   function knopfStand() {
     const k = $('#d-apply');
@@ -44,6 +84,7 @@ export async function mount(wurzel) {
       ausgewaehlt.clear();
       knopfStand();
 
+      if (!$('#d-summary')) return;
       $('#d-summary').innerHTML = [
         tile('Gruppen', num(s.groups)),
         tile('Betroffene Dateien', num(s.files)),
@@ -51,9 +92,33 @@ export async function mount(wurzel) {
         ...(s.by_kind || []).map((k) => tile(k.kind, num(k.n), bytes(k.wasted))),
       ].join('');
 
-      const gruppen = d.groups || [];
-      $('#d-list').innerHTML = gruppen.length
-        ? gruppen.map((g) => `
+      gruppen = d.groups || [];
+      zeichne();
+    } catch (exc) {
+      if ($('#d-list')) $('#d-list').innerHTML = failure('Duplikate nicht abrufbar.', exc.message);
+    }
+  }
+
+  function zeichne() {
+    if (!$('#d-list')) return;
+    const w = leiste.werte();
+    let sichtbar = w.art === 'alle' ? gruppen : gruppen.filter((g) => g.kind === w.art);
+
+    // Der Suchbegriff trifft die Dateien in einer Gruppe, nicht die Gruppe
+    // selbst — sonst könnte man nach nichts Sinnvollem suchen.
+    const suche = (w.q || '').toLowerCase();
+    if (suche) {
+      sichtbar = sichtbar.filter((g) => (g.members || []).some((m) =>
+        [m.path, m.title, m.artist].some((f) => String(f || '').toLowerCase().includes(suche))));
+    }
+    sichtbar = filtern(sichtbar, w, {
+      sortierer: { wasted: (g) => g.wasted || 0, files: (g) => g.files || 0, id: (g) => g.id },
+    });
+    leiste.setzeZaehler(sichtbar.length === gruppen.length
+      ? `${gruppen.length}` : `${sichtbar.length} von ${gruppen.length}`);
+
+    $('#d-list').innerHTML = sichtbar.length
+        ? sichtbar.map((g) => `
             <div class="card card-flush" data-group="${g.id}">
               <div class="item item-head">
                 <label class="inline">
@@ -78,7 +143,8 @@ export async function mount(wurzel) {
                     <span class="sr-only">Diese Datei behalten</span>
                   </label>
                   <div class="item-main">
-                    <div class="item-title mono tiny break">${esc(m.path)}</div>
+                    <div class="item-title mono tiny break">${esc(
+                      w.pfade ? m.path : String(m.path || '').split(/[\/]/).pop())}</div>
                     <div class="item-sub">${esc(m.artist || '')} — ${esc(m.title || '')}</div>
                   </div>
                   <div class="item-side">
@@ -90,11 +156,10 @@ export async function mount(wurzel) {
                   </div>
                 </div>`).join('')}
             </div>`).join('')
-        : empty('Keine offenen Duplikate.',
-                'Starte oben eine Suche. Der Index muss dafür aufgebaut sein.');
-    } catch (exc) {
-      $('#d-list').innerHTML = failure('Duplikate nicht abrufbar.', exc.message);
-    }
+        : empty(gruppen.length ? 'Keine Gruppe passt zum Filter.' : 'Keine offenen Duplikate.',
+                gruppen.length
+                  ? 'Setze Suche und Art in der Leiste oben zurück.'
+                  : 'Starte oben eine Suche. Der Index muss dafür aufgebaut sein.');
   }
   await lade();
 
@@ -118,7 +183,7 @@ export async function mount(wurzel) {
   wurzel.addEventListener('click', async (e) => {
     const ignorieren = e.target.closest('[data-ignore]');
     const tun = e.target.closest('[data-do]');
-    const anwenden = e.target.closest('#d-apply');
+    const uebernehmen = e.target.closest('#d-apply');
 
     if (ignorieren) {
       try {
@@ -135,15 +200,15 @@ export async function mount(wurzel) {
       } catch (exc) { fail(exc.message); } finally { tun.disabled = false; }
       return;
     }
-    if (anwenden && ausgewaehlt.size) {
+    if (uebernehmen && ausgewaehlt.size) {
       if (!confirm(`${ausgewaehlt.size} Gruppe(n) bereinigen?\n\n`
         + 'Die nicht behaltenen Dateien werden in den Quarantäne-Ordner verschoben, nicht gelöscht.')) return;
-      anwenden.disabled = true;
+      uebernehmen.disabled = true;
       try {
         const r = await post('/api/library/dupes/apply', { groups: [...ausgewaehlt] });
         ok(`Eingeplant. Quarantäne: ${r.quarantine}`);
         setTimeout(lade, 1500);
-      } catch (exc) { fail(exc.message); anwenden.disabled = false; }
+      } catch (exc) { fail(exc.message); uebernehmen.disabled = false; }
     }
   });
 }

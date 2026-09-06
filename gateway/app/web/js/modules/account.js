@@ -16,9 +16,10 @@ export async function mount(wurzel, ctx) {
   try {
     ich = await get('/api/auth/me');
   } catch (exc) {
-    $('#acc-body').innerHTML = failure('Konto nicht abrufbar.', exc.message);
+    if ($('#acc-body')) $('#acc-body').innerHTML = failure('Konto nicht abrufbar.', exc.message);
     return;
   }
+  if (!$('#acc-body')) return;
 
   $('#acc-body').innerHTML = `
     <div class="card">

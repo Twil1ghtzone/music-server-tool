@@ -3,10 +3,12 @@
 
 import { api, post, onUnauthorized, setAngemeldet } from './core/api.js';
 import { $, esc, icon } from './core/dom.js';
-import { navModule, findeModul } from './core/registry.js';
+import { navGruppen, findeModul, darfSehen } from './core/registry.js';
 import * as router from './core/router.js';
 import * as bus from './core/bus.js';
 import * as player from './core/player.js';
+import * as prefs from './core/prefs.js';
+import * as shortcuts from './core/shortcuts.js';
 import { fail } from './core/toast.js';
 
 const state = { user: null };
@@ -42,13 +44,35 @@ async function zeigeApp(user) {
 
   baueNavigation();
   bus.connect();
+
+  // Ohne Route in der Adresse auf die eingestellte Startseite gehen. Wer
+  // einen Link geöffnet hat, landet dort, wo der Link hinzeigt.
+  const start = prefs.hole('startseite');
+  if (!location.hash && start && start !== 'overview'
+      && darfSehen(findeModul(start), istAdmin())) {
+    location.hash = `#/${start}`;
+  }
   await router.zeichne();
 }
 
 function baueNavigation() {
-  $('#nav').innerHTML = navModule(istAdmin()).map((m) => `
-    <a href="#/${m.id}" data-nav="${m.id}">${icon(m.symbol)}<span>${esc(m.titel)}</span></a>
+  // Gruppiert statt als eine Liste von elf Punkten: die Überschriften sagen,
+  // wo etwas hingehört, und man liest sie einmal statt jedes Mal zu suchen.
+  $('#nav').innerHTML = navGruppen(istAdmin()).map(([titel, module]) => `
+    <div class="nav-group">${esc(titel)}</div>
+    ${module.map((m) => `
+      <a href="#/${m.id}" data-nav="${m.id}">${icon(m.symbol)}<span>${esc(m.titel)}</span>
+        <span class="nav-count" data-zaehler="${m.id}" hidden></span></a>`).join('')}
   `).join('');
+}
+
+/** Zahl am Menüpunkt — zeigt offene Arbeit, ohne dass man die Seite öffnet. */
+function setzeZaehler(id, anzahl, beschaeftigt = false) {
+  const el = document.querySelector(`[data-zaehler="${id}"]`);
+  if (!el) return;
+  el.hidden = !anzahl;
+  el.textContent = anzahl > 99 ? '99+' : String(anzahl);
+  el.className = `nav-count${beschaeftigt ? ' nav-count-busy' : ''}`;
 }
 
 function markiereAktiv(id) {
@@ -61,6 +85,13 @@ function markiereAktiv(id) {
   }
   const modul = findeModul(id);
   if (modul) document.title = `${modul.titel} · music-server-tool`;
+
+  // Kurzes Einblenden je Seitenwechsel. Die Klasse muss erst weg und dann
+  // wieder dran, sonst läuft die Animation beim zweiten Mal nicht.
+  const view = $('#view');
+  view.classList.remove('view-in');
+  void view.offsetWidth;
+  view.classList.add('view-in');
 }
 
 // ----------------------------------------------------------- Ereignisstrom
@@ -68,6 +99,17 @@ bus.onConnectionChange((verbunden) => {
   const el = $('#sse-state');
   el.textContent = verbunden ? 'live' : 'getrennt';
   el.className = `pill ${verbunden ? 'pill-ok' : 'pill-err'}`;
+});
+
+// Offene Arbeit an den Menüpunkten anzeigen. Kommt ohnehin über den Strom —
+// dafür braucht es keine eigene Abfrage.
+bus.on('state', (stand) => {
+  const jobs = stand.jobs || {};
+  const laufend = (jobs.running || 0) + (jobs.pending || 0);
+  setzeZaehler('jobs', laufend, Boolean(jobs.running));
+  const offen = (stand.queue || []).filter(
+    (i) => !i.navidrome_id && i.state !== 'ready').length;
+  setzeZaehler('queue', offen, offen > 0);
 });
 
 // Fehler aus dem Protokoll immer sichtbar machen, egal welches Modul läuft.
@@ -116,7 +158,22 @@ $('#logout').addEventListener('click', async () => {
   zeigeAnmeldung();
 });
 
+// ----------------------------------------------------------- Tastaturkürzel
+function zeigeKuerzel() {
+  if (state.user) router.gehe('settings');
+}
+$('#shortcuts').innerHTML = icon('keyboard');
+$('#shortcuts').addEventListener('click', zeigeKuerzel);
+
+shortcuts.init({
+  hilfe: zeigeKuerzel,
+  stopp: () => player.stop(),
+  darf: (id) => Boolean(state.user) && darfSehen(findeModul(id), istAdmin()),
+});
+
 // ------------------------------------------------------------------ Start
+$('#login-mark').innerHTML = icon('note');
+prefs.wendeAn();
 router.init({ istAdmin, user: () => state.user }, markiereAktiv);
 
 (async function start() {

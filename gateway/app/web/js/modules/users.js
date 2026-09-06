@@ -2,6 +2,8 @@
 
 import { get, post, patch, del } from '../core/api.js';
 import { $, esc, icon, empty, failure, skeleton, relativeTime } from '../core/dom.js';
+import { werkzeugleiste, anwenden } from '../core/toolbar.js';
+import * as prefs from '../core/prefs.js';
 import { ok, fail } from '../core/toast.js';
 
 export const meta = { id: 'users', titel: 'Benutzer' };
@@ -45,6 +47,7 @@ export async function mount(wurzel) {
 
       <div class="card card-flush">
         <h3>Vorhandene Benutzer</h3>
+        <div id="u-leiste"></div>
         <div id="u-list" class="list">${skeleton(3)}</div>
       </div>
     </div>`;
@@ -60,18 +63,49 @@ export async function mount(wurzel) {
       </div></div>`;
   }
 
-  async function lade() {
+  let alle = [];
+
+  const leiste = werkzeugleiste({
+    id: 'users',
+    standard: { q: '', sort: 'username', richtung: 'auf', rolle: 'alle', details: true },
+    suche: { platzhalter: 'Benutzer filtern…', label: 'Benutzer filtern' },
+    filter: [{ name: 'rolle', label: 'Nach Rolle filtern', werte: [
+      ['alle', 'Alle Rollen'], ['admin', 'Nur Administratoren'], ['user', 'Nur Benutzer'],
+    ] }],
+    sortierung: [['username', 'Name'], ['last_login_at', 'Letzte Anmeldung'], ['sessions', 'Sitzungen']],
+    zusatz: [
+      { name: 'details', art: 'schalter', label: 'Zweite Zeile zeigen',
+        hinweis: 'Letzte Anmeldung, offene Sitzungen, Zwei-Faktor' },
+    ],
+    beiAenderung: () => zeichne(),
+  });
+  $('#u-leiste').replaceWith(leiste.el);
+  leiste.el.classList.add('pad-body');
+
+  function zeichne() {
     const el = $('#u-list');
-    try {
-      const { users } = await get('/api/users');
-      el.innerHTML = users.length ? users.map((u) => `
+    if (!el) return;
+    const w = leiste.werte();
+    let users = w.rolle === 'alle' ? alle : alle.filter((u) => u.role === w.rolle);
+    users = anwenden(users, w, {
+      felder: ['username'],
+      sortierer: {
+        username: (u) => u.username || '',
+        last_login_at: (u) => u.last_login_at || '',
+        sessions: (u) => u.sessions || 0,
+      },
+    });
+    leiste.setzeZaehler(users.length === alle.length
+      ? `${alle.length}` : `${users.length} von ${alle.length}`);
+
+    el.innerHTML = users.length ? users.map((u) => `
         <div class="item">
           <div class="item-main">
             <div class="item-title">${esc(u.username)}${
               u.self ? ' <span class="faint tiny">(du)</span>' : ''}</div>
-            <div class="item-sub">${
+            ${w.details ? `<div class="item-sub">${
               u.last_login_at ? `zuletzt ${esc(relativeTime(u.last_login_at))}` : 'nie angemeldet'
-            } · ${u.sessions} offene Sitzung(en)${u.totp_enabled ? ' · 2FA' : ''}</div>
+            } · ${u.sessions} offene Sitzung(en)${u.totp_enabled ? ' · 2FA' : ''}</div>` : ''}
           </div>
           <div class="item-side">
             <label class="sr-only" for="role-${u.id}">Rolle von ${esc(u.username)}</label>
@@ -84,9 +118,17 @@ export async function mount(wurzel) {
             ${u.self ? '' : `<button type="button" class="btn btn-sm btn-danger"
               data-del="${u.id}" data-name="${esc(u.username)}">Löschen</button>`}
           </div>
-        </div>`).join('') : empty('Keine Benutzer.');
+        </div>`).join('')
+      : empty(alle.length ? 'Kein Benutzer passt zum Filter.' : 'Keine Benutzer.',
+              alle.length ? 'Setze Suche und Rollenfilter oben zurück.' : '');
+  }
+
+  async function lade() {
+    try {
+      alle = (await get('/api/users')).users || [];
+      zeichne();
     } catch (exc) {
-      el.innerHTML = failure('Benutzer nicht abrufbar.', exc.message);
+      if ($('#u-list')) $('#u-list').innerHTML = failure('Benutzer nicht abrufbar.', exc.message);
     }
   }
   await lade();
@@ -134,6 +176,8 @@ export async function mount(wurzel) {
         if (r.password) zeigePasswort(neu.dataset.name, r.password);
         ok('Passwort erzeugt. Offene Sitzungen wurden beendet.');
       } else {
+        // Ein Benutzer verschwindet endgültig — hier wird auch dann gefragt,
+        // wenn Rückfragen abgeschaltet sind.
         if (!confirm(`${weg.dataset.name} wirklich löschen?`)) return;
         await del(`/api/users/${weg.dataset.del}`);
         ok('Benutzer gelöscht');
