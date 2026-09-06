@@ -393,6 +393,11 @@ async def _orphan_case() -> tuple[str, int]:
         "INSERT INTO virtual_track(id, provider, provider_id, title, state) "
         "VALUES ('mgv-dz-777', 'dz', '777', 'Haenger', 'downloading')"
     )
+    # Lebenszeichen des Workers: ohne eines gilt er als tot, danach als lebend.
+    vorher = await jobs.worker_status()
+    await jobs.heartbeat()
+    nachher = await jobs.worker_status()
+
     geloest = await downloader.reset_orphaned_states()
     row = await _dbmod.db.fetch_one(
         "SELECT state FROM virtual_track WHERE id = 'mgv-dz-777'"
@@ -413,13 +418,49 @@ async def _orphan_case() -> tuple[str, int]:
         "SELECT navidrome_id FROM virtual_track WHERE id = 'mgv-dz-888'"
     )
     await _dbmod.db.close()
-    return row["state"], geloest, geschuetzt, bool(noch_da)
+    return row["state"], geloest, geschuetzt, bool(noch_da), vorher, nachher
 
 
-_state, _resolved, _protected, _still_there = asyncio.run(_orphan_case())
+(_state, _resolved, _protected, _still_there,
+ _hb_vorher, _hb_nachher) = asyncio.run(_orphan_case())
+check("Ohne Lebenszeichen gilt der Worker als tot",
+      _hb_vorher["alive"] is False and _hb_vorher["ever_seen"] is False, str(_hb_vorher))
+check("Nach dem Lebenszeichen gilt er als lebend",
+      _hb_nachher["alive"] is True and _hb_nachher["age"] is not None, str(_hb_nachher))
 check("Haengender Titel wird beim Start geloest", _state == "failed" and _resolved == 1,
       f"{_state}, {_resolved} betroffen")
 check("Importierter Titel ist vor dem Entfernen geschuetzt", _protected and _still_there)
+
+# Ein leeres Katalogergebnis darf nicht fuer die volle Cache-Dauer
+# festgeschrieben werden - eine einzelne Stoerung liesse den Katalog sonst
+# minutenlang leer wirken, obwohl Deezer laengst wieder antwortet.
+import time as _zeit  # noqa: E402
+
+from app.clients import deezer as _deezer  # noqa: E402
+
+
+async def _cache_case() -> tuple[float, float]:
+    _deezer._cache.clear()
+
+    async def leer() -> list:
+        return []
+
+    async def voll() -> list:
+        return [{"provider_id": "1"}]
+
+    await _deezer._cached("test:leer", leer)
+    frist_leer = _deezer._cache["test:leer"][0] - _zeit.monotonic()
+    await _deezer._cached("test:voll", voll)
+    frist_voll = _deezer._cache["test:voll"][0] - _zeit.monotonic()
+    _deezer._cache.clear()
+    return frist_leer, frist_voll
+
+
+_leer_frist, _voll_frist = asyncio.run(_cache_case())
+check("Leeres Katalogergebnis wird nur kurz gehalten",
+      _leer_frist <= _deezer.EMPTY_TTL + 1, f"{_leer_frist:.0f} s")
+check("Echtes Katalogergebnis wird normal gehalten",
+      _voll_frist > _deezer.EMPTY_TTL + 1, f"{_voll_frist:.0f} s")
 
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
 check("NoCredentials ist ein permanenter Fehler",

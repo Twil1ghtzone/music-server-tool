@@ -27,6 +27,14 @@ _cache_lock = asyncio.Lock()
 _CACHE_MAX = 512
 
 
+# Leere Ergebnisse nur ganz kurz halten. Eine einzelne Stoerung - ein
+# abgebrochener Handshake, eine Zeitueberschreitung - wuerde sonst fuer die
+# volle Cache-Dauer festgeschrieben: der Katalog bliebe minutenlang leer,
+# obwohl Deezer laengst wieder antwortet, und niemand kaeme auf die Idee,
+# dass die Ursache ein Cache-Eintrag von vor fuenf Minuten ist.
+EMPTY_TTL = 15
+
+
 async def _cached(key: str, factory, ttl: int | None = None) -> Any:
     ttl = ttl if ttl is not None else settings.search_cache_ttl
     now = time.monotonic()
@@ -34,6 +42,8 @@ async def _cached(key: str, factory, ttl: int | None = None) -> Any:
     if hit and hit[0] > now:
         return hit[1]
     value = await factory()
+    if not value:
+        ttl = min(ttl, EMPTY_TTL)
     async with _cache_lock:
         if len(_cache) > _CACHE_MAX:
             # Billigste brauchbare Verdraengung: abgelaufene Eintraege raus.

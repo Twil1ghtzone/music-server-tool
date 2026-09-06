@@ -66,6 +66,7 @@ async def status_overview(user: dict = Depends(security.current_user)) -> dict:
     return {
         "navidrome": {**nd_info, "scan": scan},
         "jobs": job_stats,
+        "worker": await jobs.worker_status(),
         "library": lib,
         "duplicates": dupes,
         "virtual": virtual,

@@ -38,6 +38,9 @@ HANDLERS: dict[str, Handler] = {
 
 IDLE_SLEEP = 1.5
 MAINTENANCE_INTERVAL = 300.0
+# Deutlich kuerzer als jobs.HEARTBEAT_STALE_SECONDS, damit ein kurzer
+# Aussetzer nicht sofort als Ausfall gilt.
+HEARTBEAT_INTERVAL = 20.0
 
 _stop = asyncio.Event()
 
@@ -132,9 +135,20 @@ async def main() -> None:
 
     running: set[asyncio.Task] = set()
     housekeeping = asyncio.create_task(maintenance())
+    letztes_lebenszeichen = 0.0
 
     try:
         while not _stop.is_set():
+            # Regelmaessig melden, dass es uns gibt. Ohne das sieht das
+            # Dashboard bei einem ausgefallenen Worker nur, dass Jobs liegen
+            # bleiben - aber nicht, warum.
+            if time.monotonic() - letztes_lebenszeichen > HEARTBEAT_INTERVAL:
+                letztes_lebenszeichen = time.monotonic()
+                try:
+                    await jobs.heartbeat()
+                except Exception as exc:  # pragma: no cover
+                    log.debug("Lebenszeichen fehlgeschlagen: %s", exc)
+
             if len(running) >= settings.worker_concurrency:
                 done, running = await asyncio.wait(
                     running, return_when=asyncio.FIRST_COMPLETED

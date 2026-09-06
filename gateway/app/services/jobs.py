@@ -209,6 +209,40 @@ async def listing(state: str | None = None, limit: int = 100) -> list[dict]:
     return rows
 
 
+# ---------------------------------------------------------- Lebenszeichen
+# Der Worker laeuft in einem eigenen Container. Faellt er aus, bleiben Jobs
+# einfach auf 'pending' liegen und Titel auf 'queued' stehen - ohne dass
+# irgendwo stuende, warum nichts passiert. Genau das war lange nicht sichtbar.
+HEARTBEAT_KEY = "worker.heartbeat"
+HEARTBEAT_STALE_SECONDS = 90
+
+
+async def heartbeat() -> None:
+    await db.set_setting(HEARTBEAT_KEY, "now")
+    await db.execute(
+        "UPDATE setting SET value = datetime('now') WHERE key = ?", (HEARTBEAT_KEY,)
+    )
+
+
+async def worker_status() -> dict[str, Any]:
+    """Lebt der Worker? Alter des letzten Lebenszeichens in Sekunden."""
+    row = await db.fetch_one(
+        "SELECT value AS gesehen, "
+        "       CAST((julianday('now') - julianday(value)) * 86400 AS INTEGER) AS alter_s "
+        "  FROM setting WHERE key = ?",
+        (HEARTBEAT_KEY,),
+    )
+    if not row or row["alter_s"] is None:
+        return {"alive": False, "last_seen": None, "age": None, "ever_seen": False}
+    alter = int(row["alter_s"])
+    return {
+        "alive": alter <= HEARTBEAT_STALE_SECONDS,
+        "last_seen": row["gesehen"],
+        "age": alter,
+        "ever_seen": True,
+    }
+
+
 async def prune(keep: int = 500) -> None:
     await db.execute(
         "DELETE FROM job WHERE state IN ('done','cancelled') AND id <= "

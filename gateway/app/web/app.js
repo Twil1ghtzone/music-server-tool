@@ -240,14 +240,26 @@ async function loadOverview() {
   const jobs = status.jobs || {};
   const virtual = status.virtual || {};
 
-  // Ohne Navidrome-Zugang laeuft der Import nur halb - das gehoert nach oben,
-  // nicht in eine Kachel, die man fuer Deko halten kann.
-  $('#overview-hint').innerHTML = (nd.online && !nd.authenticated)
-    ? `<p class="notice">Kein Navidrome-Zugang. Importierte Titel lassen sich
-         dann nicht auf ihre ID auflösen.
-         <a href="#" data-view-link="diagnostics">Unter Diagnose eintragen</a> —
-         oder einmal mit einem Musik-Client auf Port 8080 anmelden.</p>`
-    : '';
+  // Ohne Navidrome-Zugang läuft der Import nur halb, ohne Worker gar nicht.
+  // Beides gehört nach oben, nicht in eine Kachel, die man für Deko hält.
+  const worker = status.worker || {};
+  const hinweise = [];
+  if (!worker.alive) {
+    hinweise.push(`<p class="notice" style="border-color:var(--err);background:#2a1618;color:#ffb4ae">
+      <strong>Der Worker antwortet nicht.</strong> Downloads, Import und Scans
+      bleiben liegen — angeforderte Titel hängen dann auf „queued“.
+      ${worker.ever_seen
+        ? `Letztes Lebenszeichen vor ${Math.round((worker.age || 0) / 60)} Minuten.`
+        : 'Er hat sich noch nie gemeldet.'}
+      Prüfen mit <code>docker logs music-gateway-worker</code>.</p>`);
+  }
+  if (nd.online && !nd.authenticated) {
+    hinweise.push(`<p class="notice">Kein Navidrome-Zugang. Importierte Titel
+      lassen sich dann nicht auf ihre ID auflösen.
+      <a href="#" data-view-link="diagnostics">Unter Diagnose eintragen</a> —
+      oder einmal mit einem Musik-Client auf Port 8080 anmelden.</p>`);
+  }
+  $('#overview-hint').innerHTML = hinweise.join('');
 
   $('#tiles').innerHTML = [
     tile('Navidrome',
@@ -257,7 +269,9 @@ async function loadOverview() {
     tile('Titel indexiert', (lib.files ?? 0).toLocaleString('de-DE'),
          `${bytes(lib.bytes)} · ${duration(lib.seconds)}`),
     tile('Jobs aktiv', (jobs.pending || 0) + (jobs.running || 0),
-         `${jobs.failed || 0} fehlgeschlagen`, jobs.failed ? 'warn' : ''),
+         worker.alive ? `${jobs.failed || 0} fehlgeschlagen`
+                      : 'Worker antwortet nicht',
+         worker.alive ? (jobs.failed ? 'warn' : '') : 'err'),
     tile('On-Demand geladen', virtual.ready ?? 0,
          `${virtual.active ?? 0} unterwegs · ${virtual.failed ?? 0} Fehler`,
          virtual.failed ? 'warn' : 'ok'),
@@ -390,18 +404,21 @@ $('#search-form').addEventListener('submit', async (event) => {
 
     $('#search-catalog').innerHTML = (data.catalog || []).map((track) => {
       const known = track.known;
-      // Ein fehlgeschlagener Titel muss erneut anstoßbar sein und seinen
-      // Grund zeigen - sonst steht dort nur ein Zustand ohne Erklärung.
+      // Solange ein Titel nicht wirklich in der Bibliothek liegt, muss er
+      // anstoßbar bleiben. Vorher zeigte ein Zustand wie "queued" nur eine
+      // Plakette ohne Knopf - hängt der Worker, war der Eintrag damit
+      // dauerhaft tot und es gab keinen Weg zurück.
+      const zustand = known && known.state !== 'virtual' ? known.state : null;
       let badge;
       if (known?.navidrome_id) {
         badge = '<span class="pill ok">vorhanden</span>';
-      } else if (known && known.state === 'failed') {
-        badge = `<span class="pill err">fehlgeschlagen</span>
-                 <button class="tiny" data-download="${esc(track.provider_id)}">Erneut</button>`;
-      } else if (known && known.state !== 'virtual') {
-        badge = `<span class="pill running">${esc(known.state)}</span>`;
       } else {
-        badge = `<button class="tiny primary" data-download="${esc(track.provider_id)}">Laden</button>`;
+        const pill = zustand
+          ? `<span class="pill ${zustand === 'failed' ? 'err' : 'running'}">${esc(zustand)}</span>`
+          : '';
+        const beschriftung = zustand ? 'Erneut' : 'Laden';
+        const stil = zustand ? 'tiny' : 'tiny primary';
+        badge = `${pill}<button class="${stil}" data-download="${esc(track.provider_id)}">${beschriftung}</button>`;
       }
       const grund = known?.error ? ` · ${esc(known.error)}` : '';
       return `<div class="item"><div class="main">
