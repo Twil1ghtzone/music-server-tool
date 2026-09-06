@@ -1,0 +1,354 @@
+/* Wiederverwendbare Bausteine. Jedes Modul soll aus diesen bauen und
+ * moeglichst kein eigenes CSS brauchen. */
+
+/* ============================================================== Schaltflaechen */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  min-height: var(--tap-compact);
+  padding: var(--s2) var(--s4);
+  background: var(--surface-hi);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  /* Nie "all" animieren - nur was sich wirklich aendert. */
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease),
+              transform var(--dur-fast) var(--ease);
+  /* Verhindert die 300ms-Verzoegerung auf Beruehrgeraeten. */
+  touch-action: manipulation;
+}
+.btn:hover:not(:disabled) { background: var(--surface-max); border-color: var(--line-strong); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Gruen heisst "loslegen": herunterladen, starten. */
+.btn-go { background: var(--go); border-color: var(--go); color: var(--go-ink); font-weight: 600; }
+.btn-go:hover:not(:disabled) { background: var(--go-hover); border-color: var(--go-hover); }
+
+.btn-danger { background: var(--err-dim); border-color: #6a2b2f; color: var(--err-hover); }
+.btn-danger:hover:not(:disabled) { background: #5a2327; border-color: var(--err); }
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-hi); color: var(--text); }
+
+.btn-sm { min-height: var(--tap-compact); padding: var(--s1) var(--s3); font-size: var(--t-xs); }
+
+/* Nur-Symbol-Schaltflaechen brauchen immer ein aria-label im Markup. */
+.btn-icon {
+  width: var(--tap-compact); height: var(--tap-compact);
+  min-height: 0; padding: 0; flex: none;
+}
+.btn-icon svg { width: 1rem; height: 1rem; }
+
+/* Wichtige Aktionen bekommen das volle Beruehrziel von 44px. */
+.btn-lg { min-height: var(--tap); padding: var(--s3) var(--s5); font-size: var(--t-md); }
+
+.btn-row { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
+
+/* ============================================================== Karten */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--s4);
+  margin-bottom: var(--s4);
+}
+.card > h3 { margin-bottom: var(--s3); }
+.card-flush { padding: 0; overflow: hidden; }
+.card-flush > h3 { padding: var(--s4) var(--s4) 0; margin-bottom: var(--s3); }
+
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr)); gap: var(--s4); }
+.row { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+.row > .grow { flex: 1; min-width: 12rem; }
+.stack { display: grid; gap: var(--s3); }
+
+/* ============================================================== Kennzahlen */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--s3); margin-bottom: var(--s4); }
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--s3) var(--s4);
+  transition: border-color var(--dur) var(--ease);
+}
+.tile-label { color: var(--text-muted); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+.tile-value { font-size: var(--t-xl); font-weight: 620; margin-top: 2px; }
+.tile-sub { color: var(--text-muted); font-size: var(--t-xs); margin-top: 2px; }
+.tile-ok   .tile-value { color: var(--go); }
+.tile-warn .tile-value { color: var(--warn); }
+.tile-err  .tile-value { color: var(--err); }
+
+/* ============================================================== Listen */
+.list {
+  display: grid; gap: 1px;
+  background: var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.item {
+  display: flex; gap: var(--s3); align-items: center; justify-content: space-between;
+  background: var(--surface);
+  padding: var(--s2) var(--s3);
+  font-size: var(--t-sm);
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.item:hover { background: var(--surface-hi); }
+/* min-width: 0 ist noetig, damit truncate in einem Flex-Kind greift. */
+.item-main { min-width: 0; flex: 1; }
+.item-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-sub { color: var(--text-muted); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-side { display: flex; gap: var(--s2); align-items: center; flex: none; }
+
+/* ============================================================== Plaketten */
+.pill {
+  display: inline-flex; align-items: center; gap: var(--s1);
+  padding: 2px var(--s2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: var(--t-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.pill-ok   { color: var(--go);     border-color: var(--go-dim); }
+.pill-warn { color: var(--warn);   border-color: var(--warn-dim); }
+.pill-err  { color: var(--err);    border-color: var(--err-dim); }
+.pill-busy { color: var(--accent); border-color: var(--accent-dim); }
+
+/* ============================================================== Hinweise */
+.notice {
+  display: flex; gap: var(--s3); align-items: flex-start;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid var(--accent-dim);
+  border-left-width: 3px;
+  border-radius: var(--r-sm);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s4);
+  font-size: var(--t-sm);
+}
+.notice-warn { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border-color: var(--warn-dim); }
+.notice-err  { background: color-mix(in srgb, var(--err)  10%, var(--surface)); border-color: var(--err-dim); }
+.notice svg { flex: none; width: 1.15rem; height: 1.15rem; margin-top: 1px; }
+.notice-warn svg { color: var(--warn); }
+.notice-err svg  { color: var(--err); }
+
+/* ============================================================== Zustaende
+ * Jede Liste kann drei Dinge zeigen: laedt, leer, kaputt. Vorher fehlten
+ * alle drei - man sah nur nichts und wusste nicht, warum. */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hi) 37%, var(--surface) 63%);
+  background-size: 400% 100%;
+  border-radius: var(--r-sm);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: var(--surface-hi); }
+}
+.skeleton-row { height: 2.6rem; margin-bottom: 1px; }
+.skeleton-text { height: 0.8rem; }
+
+.empty, .failure {
+  display: grid; gap: var(--s2); justify-items: center; text-align: center;
+  padding: var(--s6) var(--s4);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+}
+.empty svg, .failure svg { width: 1.75rem; height: 1.75rem; opacity: 0.6; }
+.failure { color: var(--err); }
+.empty p, .failure p { max-width: 42ch; margin: 0; }
+
+/* ============================================================== Fortschritt */
+.bar {
+  width: 7rem; height: 5px; flex: none;
+  background: var(--line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.bar > span {
+  display: block; height: 100%;
+  background: var(--accent);
+  border-radius: inherit;
+  transition: width var(--dur-slow) var(--ease);
+}
+.bar-go > span { background: var(--go); }
+
+/* ============================================================== Tabellen */
+table { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+th, td { text-align: left; padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line); }
+th {
+  color: var(--text-muted); font-weight: 500; font-size: var(--t-xs);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+tbody tr:hover { background: var(--surface-hi); }
+.table-wrap { overflow-x: auto; }
+
+/* ============================================================== Meldungen */
+.toasts {
+  position: fixed; right: var(--s4); bottom: var(--s4);
+  display: grid; gap: var(--s2);
+  max-width: min(24rem, calc(100vw - 2rem));
+  z-index: var(--z-toast);
+}
+.toast {
+  display: flex; gap: var(--s2); align-items: flex-start;
+  background: var(--surface-hi);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: var(--s3);
+  font-size: var(--t-sm);
+  box-shadow: var(--shadow-lg);
+  animation: toast-in var(--dur) var(--ease);
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+.toast-ok  { border-left-color: var(--go); }
+.toast-err { border-left-color: var(--err); }
+
+/* ============================================================== Cover-Raster */
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: var(--s4);
+}
+.cover-card {
+  display: grid; gap: var(--s2);
+  background: none; border: 0; padding: 0;
+  color: inherit; text-align: left; cursor: pointer;
+  text-decoration: none;
+}
+.cover-art {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--surface-hi);
+  box-shadow: var(--shadow);
+}
+.cover-art img { width: 100%; height: 100%; object-fit: cover; }
+.cover-card:hover .cover-art img,
+.cover-card:focus-visible .cover-art img { transform: scale(1.04); }
+.cover-art img { transition: transform var(--dur-slow) var(--ease); }
+.cover-round .cover-art { border-radius: var(--r-pill); }
+.cover-title { font-size: var(--t-sm); font-weight: 500; }
+.cover-sub { font-size: var(--t-xs); color: var(--text-muted); }
+.cover-title, .cover-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Abspielknopf ueber dem Cover, erscheint bei Hover und Tastaturfokus. */
+.cover-play {
+  position: absolute; inset: auto var(--s2) var(--s2) auto;
+  width: 2.25rem; height: 2.25rem;
+  display: grid; place-items: center;
+  background: var(--go); color: var(--go-ink);
+  border: 0; border-radius: var(--r-pill);
+  cursor: pointer;
+  opacity: 0; transform: translateY(0.4rem);
+  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  box-shadow: var(--shadow);
+}
+.cover-card:hover .cover-play,
+.cover-card:focus-within .cover-play,
+.cover-play:focus-visible { opacity: 1; transform: none; }
+.cover-play svg { width: 1.1rem; height: 1.1rem; }
+
+/* ============================================================== Kopfbereich */
+.hero {
+  display: flex; gap: var(--s5); align-items: flex-end;
+  padding: var(--s5);
+  margin-bottom: var(--s5);
+  background:
+    linear-gradient(to top, var(--surface), color-mix(in srgb, var(--accent) 12%, var(--surface)));
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.hero-art {
+  width: 10rem; height: 10rem; flex: none;
+  border-radius: var(--r); overflow: hidden;
+  background: var(--surface-hi); box-shadow: var(--shadow-lg);
+}
+.hero-art img { width: 100%; height: 100%; object-fit: cover; }
+.hero-round .hero-art { border-radius: var(--r-pill); }
+.hero-body { min-width: 0; }
+.hero-kind { font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.hero-title { font-size: var(--t-2xl); margin: var(--s1) 0 var(--s2); }
+.hero-meta { color: var(--text-muted); font-size: var(--t-sm); }
+
+@media (max-width: 40rem) {
+  .hero { flex-direction: column; align-items: flex-start; gap: var(--s4); }
+  .hero-art { width: 7rem; height: 7rem; }
+}
+
+/* ============================================================== Titelliste */
+.tracklist { display: grid; gap: 1px; background: var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.track {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr auto auto;
+  gap: var(--s3); align-items: center;
+  background: var(--surface);
+  padding: var(--s2) var(--s3);
+  font-size: var(--t-sm);
+}
+.track:hover { background: var(--surface-hi); }
+.track-no { color: var(--text-faint); text-align: right; font-variant-numeric: tabular-nums; }
+.track-main { min-width: 0; }
+.track-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.track-actions { display: flex; gap: var(--s1); align-items: center; }
+.track.is-playing .track-no,
+.track.is-playing .track-title { color: var(--go); }
+
+@media (max-width: 34rem) {
+  .track { grid-template-columns: 2rem 1fr auto; }
+  .track-time { display: none; }
+}
+
+/* ============================================================== Abstände
+   Die Content-Security-Policy steht auf style-src 'self' — style="…" im
+   Markup wird vom Browser verworfen, ohne dass etwas kaputt aussieht: der
+   Abstand fehlt einfach. Deshalb hier benannte Klassen statt Inline-Werte.
+   Dynamische Werte (Fortschrittsbreiten) setzt das jeweilige Modul über
+   element.style, das die Richtlinie nicht betrifft. */
+.mt-2 { margin-top: var(--s2); }
+.mt-3 { margin-top: var(--s3); }
+.mt-4 { margin-top: var(--s4); }
+
+/* Ein erzeugtes Passwort. Auffällig, auswählbar, umbrechend — es wird genau
+   einmal angezeigt und muss abgeschrieben werden können. */
+.secret {
+  display: block;
+  margin: var(--s2) 0;
+  padding: var(--s3);
+  background: var(--bg-sunken);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  user-select: all;
+}
+
+/* Inhalt, der in einer randlosen Karte trotzdem Luft braucht. */
+.pad-body { padding: 0 var(--s4) var(--s4); }
+
+/* Kopfzeile einer Duplikatgruppe und der Titel, der bleiben soll. */
+.item-head { background: var(--surface-hi); }
+.item-keeper { background: color-mix(in srgb, var(--go) 8%, var(--surface)); }
+
+/* Schmale Zahlenfelder in der Tag-Werkstatt (Jahr, Titelnummer). */
+.field-narrow { max-width: 6rem; }
+.field-wide { max-width: 12rem; }

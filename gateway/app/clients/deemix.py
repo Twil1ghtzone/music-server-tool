@@ -283,6 +283,75 @@ async def probe() -> dict[str, Any]:
     }
 
 
+# ------------------------------------------------------------ Warteschlange
+_QUEUE_CANDIDATES: tuple[str, ...] = ("/api/getQueue", "/api/queue")
+
+
+async def queue() -> dict[str, Any]:
+    """Deemix' eigene Warteschlange - die einzige Stelle mit echtem Fortschritt.
+
+    Ohne das laesst sich nur der Staging-Ordner beobachten: man sieht, dass
+    eine Datei waechst, aber nicht, dass Deemix gerade bei Titel 7 von 13 ist
+    oder auf Deezer wartet. Beides zusammen ergibt erst eine Antwort auf die
+    Frage "warum dauert das?".
+
+    Die Form unterscheidet sich zwischen Forks, deshalb wird nur
+    herausgezogen, was ueberall gleich heisst.
+    """
+    for pfad in _QUEUE_CANDIDATES:
+        try:
+            antwort = await http.deemix().get(pfad, timeout=6.0)
+            if antwort.status_code >= 400:
+                continue
+            daten = antwort.json()
+        except Exception:
+            continue
+        if isinstance(daten, dict):
+            return daten
+    return {}
+
+
+def queue_progress(daten: dict[str, Any], url: str) -> tuple[float | None, str | None]:
+    """Fortschritt und Kurztext zu genau einem Auftrag aus der Warteschlange.
+
+    Deemix legt die Eintraege je nach Fork unter "queue" (Liste), unter
+    "queueList" (Zuordnung) oder direkt in der Antwort ab. Gesucht wird der
+    Eintrag, dessen Link auf dieselbe Quelle zeigt.
+    """
+    eintraege: list[dict[str, Any]] = []
+    for schluessel in ("queueList", "queue", "data"):
+        wert = daten.get(schluessel)
+        if isinstance(wert, dict):
+            eintraege.extend(v for v in wert.values() if isinstance(v, dict))
+        elif isinstance(wert, list):
+            eintraege.extend(v for v in wert if isinstance(v, dict))
+
+    kennung = url.rstrip("/").rsplit("/", 1)[-1]
+    for eintrag in eintraege:
+        link = str(eintrag.get("link") or eintrag.get("url") or "")
+        if kennung and kennung not in link and str(eintrag.get("id") or "") != kennung:
+            continue
+
+        fertig = eintrag.get("downloaded")
+        gesamt = eintrag.get("size") or eintrag.get("tracks")
+        roh = eintrag.get("progress")
+
+        anteil: float | None = None
+        if isinstance(roh, (int, float)) and roh > 0:
+            anteil = float(roh) / 100.0 if roh > 1 else float(roh)
+        elif isinstance(fertig, int) and isinstance(gesamt, int) and gesamt > 0:
+            anteil = fertig / gesamt
+
+        text = eintrag.get("status") or eintrag.get("state") or None
+        if isinstance(fertig, int) and isinstance(gesamt, int) and gesamt > 0:
+            text = f"Deemix: Titel {fertig} von {gesamt}"
+        elif text:
+            text = f"Deemix: {text}"
+        return (min(max(anteil, 0.0), 1.0) if anteil is not None else None, text)
+
+    return (None, None)
+
+
 async def set_transport(method: str, path: str, style: str) -> None:
     await db.set_setting(SETTING_KEY, json.dumps([method, path, style]))
 

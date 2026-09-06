@@ -42,6 +42,17 @@ Navidrome-Status und Ereignisse (Server-Sent Events). Login mit Argon2id,
 Session-Cookies, CSRF-Schutz, optional TOTP-Zweifaktor, Brute-Force-Bremse pro
 IP und pro Konto.
 
+**Katalog wie bei Deemix.** Interpretenseiten mit Top-Titeln und allen Alben,
+Alben mit vollständiger Titelliste, Playlists, große Cover, 30-Sekunden-
+Hörproben und „Album laden" für ganze Veröffentlichungen. Titel, die der
+Gateway schon kennt, sind an ihrem Zustand erkennbar statt an einem Ladeknopf,
+den man versehentlich zweimal drückt.
+
+Cover und Hörproben laufen **durch den Gateway**, nicht direkt vom Browser zu
+Deezer. Das hält die Content-Security-Policy auf `'self'`. Dabei gibt es
+bewusst keinen Endpunkt, der eine beliebige URL entgegennimmt: Bildart, Prüf-
+summe und Größe werden einzeln geprüft und die Adresse daraus zusammengesetzt.
+
 **Bibliothekspflege.** Dreistufige Duplikaterkennung (Byte-Hash → Audio-Stream-
 Hash → Chromaprint), Tag-Editor mit Batch-Modus, Mängelbericht über die
 gesamte Bibliothek.
@@ -402,9 +413,40 @@ gateway/app/
 │   ├── dedupe.py      Duplikatgruppen, Keeper-Bewertung, Quarantäne
 │   ├── tags.py        mutagen: Lesen, Schreiben, Validieren
 │   └── ffmpeg.py      Subprozess-Brücke zu ffmpeg/ffprobe/fpcalc
-├── api/               REST für das Dashboard
+├── api/               REST für das Dashboard — ein Modul je Zuständigkeit
+│   ├── auth.py        Anmeldung, Passwort, TOTP
+│   ├── overview.py    Status, letzte Alben, Live-Ereignisse (SSE)
+│   ├── search.py      Kombinierte Suche: lokal + Katalog
+│   ├── catalog.py     Interpret, Album, Playlist, Cover- und Hörproben-Proxy
+│   ├── downloads.py   Anfordern, Warteschlange, ganze Veröffentlichungen
+│   ├── jobs.py        Auftragsliste, Wiederholung, Scan, Staging-Import
+│   ├── logs.py        Ereignisprotokoll mit Filter
+│   ├── diagnostics.py Zugangsdaten, Startprüfung, Client-Sicht
+│   ├── library.py     Index, Duplikate, Tags
+│   └── users.py       Konten und Rollen
 └── web/               Dashboard (kein Build-Schritt)
+    ├── css/           tokens · base · components · layout
+    └── js/
+        ├── core/      api, router, registry, bus, dom, toast, player,
+        │              catalog-ui — der gemeinsame Unterbau
+        └── modules/   ein Modul je Menüpunkt
 ```
+
+**Jeder Menüpunkt ist ein eigenes Modul.** Vorne wie hinten. Ein Frontend-Modul
+erfüllt einen bewusst kleinen Vertrag:
+
+```js
+export const meta = { id: 'queue', titel: 'Warteschlange', rolle: 'admin' };
+export async function mount(wurzel, ctx) { …; return () => aufraeumen(); }
+```
+
+Der Router lädt es per `import('./modules/' + id + '.js')`, hält genau eines
+montiert und ruft beim Wechsel die Aufräumfunktion. Ein neuer Menüpunkt ist
+damit eine neue Datei plus eine Zeile in `core/registry.js` — und kann keinen
+anderen mehr beschädigen. Im Backend hängt `main.py` die Router über eine Liste
+ein; ein neuer Bereich ist eine neue Datei plus ein Eintrag darin.
+
+Kein Build-Schritt: native ES-Module reichen und halten das Image schlank.
 
 ### Entscheidungen, die den Rest erklären
 
@@ -542,7 +584,7 @@ docker inspect music-gateway-api --format '{{index .Config.Labels "com.docker.co
 Ob die neue Fassung wirklich ausgeliefert wird:
 
 ```bash
-curl -s http://localhost:8080/style.css | head -5
+curl -s http://localhost:8080/css/tokens.css | head -5
 ```
 
 **Protokoll.** Die Seite *Protokoll* zeigt alle Ereignisse mit Filter nach

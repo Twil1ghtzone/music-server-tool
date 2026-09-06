@@ -17,6 +17,7 @@ log = get_logger("jobs")
 
 # Job-Typen
 DOWNLOAD_TRACK = "download_track"
+DOWNLOAD_RELEASE = "download_release"   # Album, Playlist oder Interpret am Stueck
 IMPORT_STAGING = "import_staging"
 NAVIDROME_SCAN = "navidrome_scan"
 LIBRARY_SCAN = "library_scan"

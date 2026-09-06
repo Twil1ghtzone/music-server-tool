@@ -462,6 +462,34 @@ check("Leeres Katalogergebnis wird nur kurz gehalten",
 check("Echtes Katalogergebnis wird normal gehalten",
       _voll_frist > _deezer.EMPTY_TTL + 1, f"{_voll_frist:.0f} s")
 
+# Der Fortschritt aus Deemix' Warteschlange. Die Antwortform unterscheidet
+# sich zwischen Forks - deshalb hier alle drei Bauarten pruefen, statt sich
+# auf die zu verlassen, die gerade im Container laeuft.
+from app.clients import deemix as _deemix  # noqa: E402
+
+_URL = "https://www.deezer.com/album/302127"
+
+_liste = {"queue": [{"link": _URL, "downloaded": 7, "size": 13}]}
+_anteil, _text = _deemix.queue_progress(_liste, _URL)
+check("Deemix-Fortschritt aus Liste", abs((_anteil or 0) - 7 / 13) < 0.001, str(_text))
+check("Deemix-Fortschritt nennt Titelzahl", _text == "Deemix: Titel 7 von 13", str(_text))
+
+_zuordnung = {"queueList": {"302127": {"link": _URL, "progress": 42, "status": "downloading"}}}
+_anteil2, _text2 = _deemix.queue_progress(_zuordnung, _URL)
+check("Deemix-Fortschritt aus Zuordnung", abs((_anteil2 or 0) - 0.42) < 0.001, str(_anteil2))
+
+# Prozent oder Anteil - beide Schreibweisen kommen vor.
+_anteil3, _ = _deemix.queue_progress({"queue": [{"link": _URL, "progress": 0.5}]}, _URL)
+check("Deemix-Fortschritt akzeptiert Anteile", abs((_anteil3 or 0) - 0.5) < 0.001, str(_anteil3))
+
+# Fremde Eintraege duerfen den eigenen Auftrag nicht ueberschreiben.
+_fremd = {"queue": [{"link": "https://www.deezer.com/album/999", "downloaded": 1, "size": 2}]}
+check("Deemix-Fortschritt ignoriert fremde Auftraege",
+      _deemix.queue_progress(_fremd, _URL) == (None, None))
+check("Deemix-Fortschritt haelt eine leere Antwort aus",
+      _deemix.queue_progress({}, _URL) == (None, None))
+
+
 # Fehlende Zugangsdaten sind kein Fall fuer Wiederholungen.
 check("NoCredentials ist ein permanenter Fehler",
       issubclass(navidrome.NoCredentials, PermanentError))

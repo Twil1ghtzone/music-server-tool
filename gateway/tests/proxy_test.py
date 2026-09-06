@@ -132,8 +132,20 @@ class FakeDeemix(BaseHTTPRequestHandler):
             self._send({"result": False, "errid": "NotLoggedIn",
                         "data": {"url": "…", "bitrate": 3}})
 
+    # Der echte Fork beantwortet diese beiden per GET. getQueue traegt den
+    # Fortschritt, den der Worker waehrend eines Downloads abfragt.
+    queue: dict = {}
+
     def do_GET(self):
-        self._send({"result": True, "queue": []})
+        path = urlparse(self.path).path
+        if path == "/api/getQueue":
+            self._send({"result": True, **FakeDeemix.queue})
+        elif path == "/api/getTracklist":
+            self._send({"result": True, "data": [
+                {"id": "1", "title": "Kogong"}, {"id": "2", "title": "Choere"},
+            ]})
+        else:
+            self._send({"result": True})
 
 
 DEEMIX_PORT = 45331
@@ -265,6 +277,106 @@ with TestClient(app) as client:
           str(aktivitaet[0]) if aktivitaet else "")
     check("Suchzugriff berichtet das Ergebnis",
           any("ergaenzt" in (a.get("detail") or "") for a in aktivitaet))
+
+    # --- Katalog ----------------------------------------------------------
+    # Was Deemix an Vorschau kann, muss auch hier ankommen: Interpret mit
+    # Top-Titeln und Alben, Album mit vollstaendiger Titelliste, Playlist.
+    kat = client.get("/api/catalog/search", params={"q": "nirvana", "kind": "album"}).json()
+    check("Katalog: Albensuche liefert Treffer", len(kat["results"]) > 0,
+          f"{len(kat['results'])} Alben")
+    check("Katalog: Alben tragen ein Bild",
+          any(a.get("md5_image") for a in kat["results"]))
+
+    kuenstler = client.get("/api/catalog/search", params={"q": "nirvana", "kind": "artist"}).json()
+    erster = kuenstler["results"][0]
+    check("Katalog: Interpretensuche liefert Treffer", len(kuenstler["results"]) > 0)
+    # Das schlichte "picture" ist eine Weiterleitung ohne Pruefsumme - genau
+    # daran sind die Interpretenbilder einmal gescheitert.
+    check("Katalog: Interpret traegt eine Bild-Pruefsumme", bool(erster.get("md5_image")),
+          str(erster.get("md5_image")))
+
+    interpret = client.get(f"/api/catalog/artist/{erster['id']}").json()
+    check("Katalog: Interpretenseite hat Top-Titel und Alben",
+          len(interpret["top"]) > 0 and len(interpret["albums"]) > 0,
+          f"{len(interpret['top'])} Titel, {len(interpret['albums'])} Alben")
+
+    album_id = interpret["albums"][0]["id"]
+    alb = client.get(f"/api/catalog/album/{album_id}").json()
+    check("Katalog: Album bringt seine Titelliste mit", len(alb["tracklist"]) > 0,
+          f"{len(alb['tracklist'])} Titel")
+    check("Katalog: Albumtitel kennen ihren Zustand",
+          all("known" in t for t in alb["tracklist"]))
+
+    pl = client.get("/api/catalog/playlist/908622995").json()
+    check("Katalog: Playlist bringt ihre Titelliste mit", len(pl["tracklist"]) > 0,
+          f"{len(pl['tracklist'])} Titel")
+
+    fehlt = client.get("/api/catalog/artist/604")
+    check("Katalog: unbekannter Interpret ergibt 404", fehlt.status_code == 404,
+          str(fehlt.status_code))
+
+    # --- Cover- und Hoerproben-Proxy --------------------------------------
+    # Wichtig ist nicht nur, dass Bytes ankommen, sondern dass hier kein
+    # offener Weiterleiter entsteht: keine freie URL, keine fremden Hosts.
+    bild = client.get(f"/api/catalog/cover/cover/{alb['md5_image']}", params={"s": 250})
+    check("Cover-Proxy liefert ein Bild",
+          bild.status_code == 200 and bild.headers["content-type"].startswith("image/"),
+          f"{bild.status_code}, {len(bild.content)} Bytes")
+
+    check("Cover-Proxy weist eine erfundene Pruefsumme ab",
+          client.get("/api/catalog/cover/cover/keinhex").status_code == 400)
+    check("Cover-Proxy weist eine fremde Bildart ab",
+          client.get(f"/api/catalog/cover/../../etc/{alb['md5_image']}").status_code in (400, 404))
+    # Eine erfundene Groesse wird auf die naechste erlaubte zurueckgesetzt,
+    # nicht durchgereicht - sonst liesse sich ueber den Parameter ein Stueck
+    # der Ziel-URL bestimmen.
+    frei = client.get(f"/api/catalog/cover/cover/{alb['md5_image']}", params={"s": 999})
+    check("Cover-Proxy setzt eine erfundene Groesse zurueck",
+          frei.status_code == 200 and frei.content == bild.content,
+          f"{frei.status_code}, {len(frei.content)} Bytes")
+
+    probe = client.get(f"/api/catalog/preview/{alb['tracklist'][0]['provider_id']}")
+    check("Hoerproben-Proxy liefert Ton",
+          probe.status_code == 200 and probe.headers["content-type"].startswith("audio/"),
+          f"{probe.status_code}, {probe.headers.get('content-type')}")
+
+    # --- Album am Stueck --------------------------------------------------
+    FakeDeemix.mode = "accept"
+    csrf = {"X-CSRF-Token": client.cookies.get("mst_csrf", "")}
+    rel = client.post("/api/download/release",
+                      json={"kind": "album", "provider_id": album_id}, headers=csrf)
+    check("Album am Stueck erzeugt einen Auftrag",
+          rel.status_code == 200 and rel.json().get("job"), rel.text[:100])
+
+    # Zweimal dasselbe Album darf keine zwei Auftraege ergeben - sonst laedt
+    # ein Doppelklick alles doppelt herunter.
+    nochmal = client.post("/api/download/release",
+                          json={"kind": "album", "provider_id": album_id}, headers=csrf)
+    check("Derselbe Sammeldownload wird nicht doppelt eingestellt",
+          nochmal.json().get("job") == rel.json().get("job"),
+          f"{rel.json().get('job')} vs {nochmal.json().get('job')}")
+
+    check("Sammeldownload weist eine unbekannte Art ab",
+          client.post("/api/download/release",
+                      json={"kind": "song", "provider_id": "1"}, headers=csrf).status_code == 422)
+    check("Sammeldownload weist eine nicht-numerische ID ab",
+          client.post("/api/download/release",
+                      json={"kind": "album", "provider_id": "../1"},
+                      headers=csrf).status_code == 422)
+
+    auftraege = client.get("/api/jobs", params={"state": "all"}).json()["jobs"]
+    check("Sammeldownload steht als eigener Auftragstyp in der Liste",
+          any(j["type"] == "download_release" for j in auftraege),
+          ", ".join(sorted({j["type"] for j in auftraege})))
+
+    # --- Router-Aufteilung ------------------------------------------------
+    # Die Aufteilung von dashboard.py darf keinen Pfad verschoben haben.
+    for pfad in ("/api/status", "/api/recent", "/api/search?q=test", "/api/queue",
+                 "/api/jobs", "/api/logs", "/api/diagnostics", "/api/preflight",
+                 "/api/client-activity", "/api/navidrome/credentials", "/api/deemix/arl"):
+        antwort = client.get(pfad)
+        check(f"Pfad bleibt erreichbar: {pfad}", antwort.status_code == 200,
+              str(antwort.status_code))
 
     # --- Zugang aus dem Dashboard -----------------------------------------
     client.delete("/api/navidrome/credentials",

@@ -1,0 +1,154 @@
+/* Grundlagen: Reset, Textelemente, Formularelemente, Fokus.
+ * Alles, was ohne eigene Klasse gilt. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  /* Sprungmarken sollen nicht unter der Kopfzeile landen. */
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--t-md);
+  line-height: var(--lh);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Verhindert das blaue Aufblitzen beim Antippen auf Mobilgeraeten. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, h4 {
+  margin: 0 0 var(--s2);
+  line-height: var(--lh-tight);
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  /* Ueberschriften sollen nicht mit einem Wort umbrechen. */
+  text-wrap: balance;
+}
+h1 { font-size: var(--t-2xl); }
+h2 { font-size: var(--t-xl); }
+h3 {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+p { margin: 0 0 var(--s3); max-width: 68ch; }  /* 65-75 Zeichen je Zeile */
+p:last-child { margin-bottom: 0; }
+
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-hover); }
+
+code, kbd, samp, .mono { font-family: var(--mono); font-size: 0.92em; }
+
+/* Zahlen sollen in Tabellen und Listen untereinander stehen. */
+.num, td, .tile-value, time { font-variant-numeric: tabular-nums; }
+
+hr { border: 0; border-top: 1px solid var(--line); margin: var(--s5) 0; }
+
+/* --- Fokus ---------------------------------------------------------------
+ * :focus-visible statt :focus - der Ring erscheint bei Tastaturbedienung,
+ * nicht bei jedem Mausklick. Nie ohne Ersatz abschalten.                  */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::selection { background: var(--accent-dim); color: var(--text); }
+
+/* --- Formularelemente ---------------------------------------------------- */
+input, select, textarea, button { font: inherit; color: inherit; }
+
+input, select, textarea {
+  width: 100%;
+  min-height: var(--tap-compact);
+  padding: var(--s2) var(--s3);
+  background: var(--bg-sunken);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+input:hover:not(:disabled), select:hover:not(:disabled), textarea:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+input:disabled, select:disabled, textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Native Auswahlfelder brauchen im Dunkelmodus ausdrueckliche Farben,
+ * sonst zeichnen manche Systeme sie hell. */
+select {
+  background-color: var(--bg-sunken);
+  color: var(--text);
+  cursor: pointer;
+}
+select option { background: var(--surface); color: var(--text); }
+
+input[type="checkbox"], input[type="radio"] {
+  width: 1.05rem; height: 1.05rem; min-height: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+label {
+  display: grid;
+  gap: var(--s1);
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+label > input, label > select, label > textarea { color: var(--text); }
+
+/* Kontrollkaestchen mit Beschriftung als ein einziges Ziel. */
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  cursor: pointer;
+  min-height: var(--tap-compact);
+}
+label.inline > input { width: auto; }
+
+fieldset { border: 0; margin: 0; padding: 0; }
+
+/* --- Bilder --------------------------------------------------------------
+ * Ohne feste Groesse springt das Layout beim Nachladen. */
+img { max-width: 100%; display: block; }
+
+/* --- Hilfsklassen --------------------------------------------------------- */
+.muted  { color: var(--text-muted); }
+.faint  { color: var(--text-faint); }
+.error  { color: var(--err); }
+.ok     { color: var(--go); }
+.warn   { color: var(--warn); }
+.small  { font-size: var(--t-sm); }
+.tiny   { font-size: var(--t-xs); }
+
+/* Sichtbar nur fuer Hilfsmittel - fuer Beschriftungen, die auf dem
+ * Bildschirm redundant waeren, dem Screenreader aber fehlen. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+
+/* Langer Text darf nie das Layout sprengen. In Flex-Kindern braucht es
+ * dafuer zusaetzlich min-width: 0. */
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.clamp-2 {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.break { overflow-wrap: anywhere; }
+
+[hidden] { display: none !important; }

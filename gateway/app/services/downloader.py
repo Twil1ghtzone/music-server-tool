@@ -166,8 +166,32 @@ def move_sidecars(source: Path, destination: Path) -> list[Path]:
 
 
 # --------------------------------------------------------------- Warten
+# Deemix nach dem Stand fragen kostet einen Roundtrip - nicht bei jedem
+# Dateisystem-Durchlauf, sondern hoechstens so oft:
+QUEUE_POLL_SECONDS = 6.0
+
+
+async def _deemix_fortschritt(url: str, letzte: float) -> tuple[float, float | None, str | None]:
+    """Fragt Deemix hoechstens alle paar Sekunden nach dem Stand.
+
+    Faellt die Abfrage aus - alter Fork, Endpunkt fehlt, Zeitueberschreitung -
+    bleibt es bei der Beobachtung des Staging-Ordners. Der Fortschritt ist
+    Beiwerk; er darf einen laufenden Download nicht gefaehrden.
+    """
+    jetzt = time.monotonic()
+    if jetzt - letzte < QUEUE_POLL_SECONDS:
+        return letzte, None, None
+    try:
+        anteil, text = deemix.queue_progress(await deemix.queue(), url)
+    except Exception as exc:
+        log.debug("Deemix-Warteschlange nicht abrufbar: %s", exc)
+        return jetzt, None, None
+    return jetzt, anteil, text
+
+
 async def wait_for_new_file(before: dict[Path, int], deadline: float,
-                            job_id: int | None = None) -> Path | None:
+                            job_id: int | None = None,
+                            url: str | None = None) -> Path | None:
     """Wartet auf eine neue, vollstaendig geschriebene Audiodatei im Staging.
 
     "Vollstaendig" heisst: die Groesse ist ueber mehrere Messungen unveraendert
@@ -177,6 +201,7 @@ async def wait_for_new_file(before: dict[Path, int], deadline: float,
     """
     sizes: dict[Path, int] = {}
     steady: dict[Path, int] = {}
+    zuletzt_gefragt = 0.0
 
     while time.monotonic() < deadline:
         await asyncio.sleep(POLL_INTERVAL)
@@ -195,11 +220,21 @@ async def wait_for_new_file(before: dict[Path, int], deadline: float,
                 steady[path] = 0
             sizes[path] = size
 
-        if job_id and fresh:
-            await jobs.progress(
-                job_id, 0.45, f"Deemix schreibt: {fresh[0].name} ({fresh[0].stat().st_size // 1024} KB)"
-                if fresh[0].exists() else f"Deemix schreibt: {fresh[0].name}"
-            )
+        if not job_id:
+            continue
+
+        # Deemix weiss besser als der Ordner, woran es gerade haengt: eine
+        # Datei, die nicht waechst, kann heruntergeladen, verschluesselt oder
+        # in einer Warteschlange stehend sein. Das sieht man nur hier.
+        anteil = text = None
+        if url:
+            zuletzt_gefragt, anteil, text = await _deemix_fortschritt(url, zuletzt_gefragt)
+
+        if text:
+            await jobs.progress(job_id, 0.2 + 0.4 * (anteil or 0.0), text)
+        elif fresh:
+            groesse = f" ({fresh[0].stat().st_size // 1024} KB)" if fresh[0].exists() else ""
+            await jobs.progress(job_id, 0.45, f"Deemix schreibt: {fresh[0].name}{groesse}")
     return None
 
 
@@ -297,7 +332,7 @@ async def _run_download(job: dict[str, Any], virtual_id: str) -> str:
     await jobs.progress(job_id, 0.2, f"An Deemix uebergeben ({transport})")
 
     deadline = time.monotonic() + settings.download_timeout
-    source = await wait_for_new_file(before, deadline, job_id)
+    source = await wait_for_new_file(before, deadline, job_id, url)
     if not source:
         await ids.set_state(virtual_id, "failed", error="Deemix hat keine Datei geliefert")
         raise RuntimeError(
@@ -342,6 +377,139 @@ async def _run_download(job: dict[str, Any], virtual_id: str) -> str:
     await ids.mark_ready(virtual_id, nd_id, str(destination))
     await emit(f"Bereit: {label}", category="download", data={"id": virtual_id, "navidrome_id": nd_id})
     return f"{destination.name} -> Navidrome {nd_id}"
+
+
+# ------------------------------------------------- Album, Playlist, Interpret
+# Der Einzeltitel-Ablauf wartet auf GENAU EINE neue Datei. Bei einem Album
+# kommen zwanzig, verteilt ueber Minuten. Deshalb ein eigener Weg: warten,
+# bis der Staging-Ordner zur Ruhe kommt, statt auf eine bestimmte Datei.
+RELEASE_SETTLE_SECONDS = 25.0
+RELEASE_TIMEOUT_FACTOR = 6
+
+
+async def _warte_bis_ruhe(before: dict[Path, int], deadline: float,
+                          job_id: int, erwartet: int | None,
+                          url: str | None = None) -> list[Path]:
+    """Sammelt neue Dateien, bis sich eine Weile nichts mehr tut."""
+    stand: dict[Path, int] = {}
+    letzte_aenderung = time.monotonic()
+    zuletzt_gefragt = 0.0
+
+    while time.monotonic() < deadline:
+        await asyncio.sleep(POLL_INTERVAL)
+        aktuell = scan_audio(settings.staging_dir)
+        neu = {p: g for p, g in aktuell.items() if p not in before}
+
+        if neu != stand:
+            stand = neu
+            letzte_aenderung = time.monotonic()
+            fertig = [p for p, g in stand.items() if g >= MIN_COMPLETE_BYTES]
+            anteil = f"{len(fertig)}/{erwartet}" if erwartet else str(len(fertig))
+            await jobs.progress(
+                job_id,
+                min(0.85, 0.2 + 0.65 * (len(fertig) / erwartet if erwartet else 0.5)),
+                f"{anteil} Titel im Staging",
+            )
+
+        # Solange Deemix meldet, dass es noch arbeitet, ist Ruhe im Ordner
+        # kein Grund abzubrechen - beim Sammeldownload liegen zwischen zwei
+        # Titeln durchaus laengere Pausen.
+        anteil = text = None
+        if url:
+            zuletzt_gefragt, anteil, text = await _deemix_fortschritt(url, zuletzt_gefragt)
+        if text:
+            await jobs.progress(job_id, min(0.85, 0.15 + 0.7 * (anteil or 0.0)), text)
+            if anteil is not None and anteil < 1.0:
+                letzte_aenderung = time.monotonic()
+
+        ruhe = time.monotonic() - letzte_aenderung
+        if stand and ruhe >= RELEASE_SETTLE_SECONDS:
+            return sorted(p for p, g in stand.items() if g >= MIN_COMPLETE_BYTES)
+
+    return sorted(p for p, g in stand.items() if g >= MIN_COMPLETE_BYTES)
+
+
+async def handle_release(job: dict[str, Any]) -> str:
+    payload = job["payload"]
+    job_id = int(job["id"])
+    url = payload.get("url")
+    label = payload.get("label") or url
+    erwartet = payload.get("tracks")
+
+    if not url:
+        raise RuntimeError("Keine Quell-URL fuer diesen Sammeldownload")
+
+    await jobs.progress(job_id, 0.05, f"Starte: {label}")
+    await emit(f"Sammeldownload gestartet: {label}", category="download",
+               data={"url": url, "tracks": erwartet})
+
+    settings.staging_dir.mkdir(parents=True, exist_ok=True)
+    before = scan_audio(settings.staging_dir)
+
+    transport = await deemix.add_to_queue(url, settings.deemix_bitrate)
+    await jobs.progress(job_id, 0.15, f"An Deemix uebergeben ({transport})")
+
+    # Grosszuegiges Zeitfenster: ein Album mit 20 Titeln dauert deutlich
+    # laenger als ein einzelner.
+    deadline = time.monotonic() + settings.download_timeout * RELEASE_TIMEOUT_FACTOR
+    dateien = await _warte_bis_ruhe(before, deadline, job_id, erwartet, url)
+    if not dateien:
+        raise RuntimeError(
+            "Keine Dateien im Staging. Pruefe die Deemix-Anmeldung unter Diagnose."
+        )
+
+    await jobs.progress(job_id, 0.9, f"Importiere {len(dateien)} Datei(en)")
+    importiert = 0
+    for quelle in dateien:
+        try:
+            meta = tags.read(quelle)
+            meta.setdefault("album_artist", meta.get("artist"))
+            ziel = move_into_library(quelle, plan_destination(quelle, meta))
+            move_sidecars(quelle, ziel)
+            importiert += 1
+        except Exception as exc:
+            log.warning("Import von %s fehlgeschlagen: %s", quelle, exc)
+
+    _cleanup_empty_dirs(settings.staging_dir)
+    try:
+        await navidrome.start_scan()
+    except Exception as exc:
+        log.debug("Scan-Trigger fehlgeschlagen (Watcher uebernimmt): %s", exc)
+
+    await emit(f"{importiert} Titel importiert: {label}", category="download")
+    return f"{importiert} von {len(dateien)} Datei(en) importiert"
+
+
+async def request_release(kind: str, provider_id: str) -> dict[str, Any]:
+    """Album, Playlist oder Interpret zum Herunterladen einstellen."""
+    if kind == "album":
+        daten = await deezer.album(provider_id)
+        label = f"{(daten or {}).get('artist', '')} — {(daten or {}).get('title', '')}".strip(" —")
+    elif kind == "playlist":
+        daten = await deezer.playlist(provider_id)
+        label = (daten or {}).get("title", "")
+    elif kind == "artist":
+        daten = await deezer.artist(provider_id)
+        label = (daten or {}).get("name", "")
+    else:
+        raise ValueError(f"Unbekannte Art: {kind}")
+
+    if not daten:
+        raise ValueError("Im Katalog nicht gefunden")
+
+    job_id = await jobs.enqueue(
+        jobs.DOWNLOAD_RELEASE,
+        {
+            "kind": kind,
+            "provider_id": provider_id,
+            "url": daten["source_url"],
+            "label": label,
+            "tracks": daten.get("tracks") or len(daten.get("tracklist") or []) or None,
+        },
+        priority=jobs.PRIORITY_NORMAL,
+        dedupe_key=f"rel:{kind}:{provider_id}",
+    )
+    return {"job": job_id, "label": label, "tracks": daten.get("tracks")}
 
 
 async def handle_import_staging(job: dict[str, Any]) -> str:
